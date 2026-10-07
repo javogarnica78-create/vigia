@@ -549,7 +549,7 @@ function marcarVacia() {
   setErr(''); log(`Referencia de estación vacía guardada. Desde ahora se mide presencia cada ${pasoPres()} s.`, 'k');
   $('pillHost').textContent = 'host: referencia lista';
 }
-function hoyKey() { return 'vigia_hoy_' + tienda() + '_' + new Date().toLocaleDateString('en-CA'); }
+function hoyKey() { return 'vigia_hoy2_' + tienda() + '_' + new Date().toLocaleDateString('en-CA'); } // hoy2: reinicio 2026-10-07
 function pintarHoy() {
   let h = {}; try { h = JSON.parse(ls(hoyKey()) || '{}'); } catch (e) {}
   const si = h.si || 0, tot = h.tot || 0;
