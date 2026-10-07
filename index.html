@@ -122,8 +122,8 @@
       <div class="stat"><b id="sPend">?</b><span>pendientes</span></div>
     </div>
 
-    <details><summary>Fuera del iframe</summary>
-      <div class="mini">Si Apps Script bloquea la captura, abre este HTML como archivo local y pon la URL /exec y el VIGIA_TOKEN (registro de setup). El deployment debe tener acceso "Cualquier usuario".</div>
+    <details><summary>Conexión (URL + token)</summary>
+      <div class="mini">El VIGIA_TOKEN está en Apps Script → proyecto Vigia → Configuración → Propiedades. Si lo cambias, recarga la página.</div>
       <input type="text" id="execUrl" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%;margin-top:6px">
       <input type="text" id="token" placeholder="VIGIA_TOKEN" style="width:100%;margin-top:6px">
     </details>
@@ -185,8 +185,36 @@ function srv(fn, ...args) {
   if (fn === 'guardarFoto') body = Object.assign({}, args[0], { token });
   else if (fn === 'guardarAreas') body = { accion: 'areas', tienda: args[0], areas: args[1], token };
   else if (fn === 'analizarPendientes') body = { accion: 'analizar', token };
+  else if (fn === 'estado') body = { accion: 'estado', token };
   else return Promise.resolve(null);
-  return fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) }).then(() => ({ opaco: true }));
+  // Apps Script responde JSON legible por CORS con text/plain (petición simple): así vemos errores reales
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) throw new Error(d.error || 'error del servidor');
+      if (fn === 'guardarFoto') return d.foto;
+      if (fn === 'analizarPendientes') return d.resultado;
+      return d;
+    });
+}
+
+async function validarToken() {
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      const d = await srv('estado');
+      $('sPend').textContent = '?';
+      log(`Conectado ✓ (token correcto) · ${d.filas} fotos en bitácora${d.tieneGemini ? '' : ' · falta GEMINI_API_KEY: no se analizan'}`, d.tieneGemini ? 'k' : 'e');
+      return true;
+    } catch (e) {
+      if (!/token/i.test(e.message)) { log('No pude validar conexión: ' + e.message, 'e'); return false; }
+      ls('vigia_token', '');
+      const t = (prompt('Token INCORRECTO. Pega el VIGIA_TOKEN real\n(Apps Script → proyecto Vigia → Configuración → VIGIA_TOKEN):') || '').trim();
+      if (!t) break;
+      $('token').value = t; ls('vigia_token', t);
+    }
+  }
+  setErr('Sin token válido: las fotos NO se van a guardar. Pon el VIGIA_TOKEN correcto en "Conexión" (abajo a la derecha).');
+  return false;
 }
 
 async function cargarConfig() {
@@ -210,11 +238,10 @@ async function cargarConfig() {
     $('execUrl').value = ls('vigia_exec') || L.exec || EXEC_SRV;
     $('token').value = ls('vigia_token') || L.token || '';
     if (!$('token').value) {
-      const t = (prompt('Vigia: pega el VIGIA_TOKEN.\nSolo se pide una vez; queda guardado en este navegador.') || '').trim();
+      const t = (prompt('Vigia: pega el VIGIA_TOKEN.\n(Apps Script → proyecto Vigia → Configuración → VIGIA_TOKEN)\nSolo se pide una vez; queda guardado en este navegador.') || '').trim();
       if (t) { $('token').value = t; ls('vigia_token', t); }
     }
-    if ($('token').value) log('Conectado al backend (token cargado).', 'k');
-    else log('Falta token: llena "Fuera del iframe".', 'e');
+    await validarToken();
   }
   renderZonas(); pintar();
 }
@@ -222,7 +249,7 @@ async function cargarConfig() {
 async function guardarZonas() {
   const t = tienda();
   ls('vigia_zonas_' + t, JSON.stringify(zonas));
-  try { const r = await srv('guardarAreas', t, { zonas }); log('Zonas guardadas para ' + t + (r && r.opaco ? ' (este navegador + servidor)' : ''), 'k'); }
+  try { await srv('guardarAreas', t, { zonas }); log('Zonas guardadas para ' + t + ' (navegador + servidor)', 'k'); }
   catch (e) { log('No se guardaron zonas en servidor: ' + e.message, 'e'); }
 }
 
@@ -465,7 +492,7 @@ $('btnStop').onclick = detener;
 $('btnAnalizar').onclick = analizar;
 $('tienda').addEventListener('change', () => { ls('vigia_tienda', tienda()); cargarConfig(); });
 $('execUrl').addEventListener('change', () => ls('vigia_exec', $('execUrl').value.trim()));
-$('token').addEventListener('change', () => ls('vigia_token', $('token').value.trim()));
+$('token').addEventListener('change', () => { ls('vigia_token', $('token').value.trim()); setErr(''); validarToken(); });
 $('tienda').value = ls('vigia_tienda') || '';
 if (!EN_GAS && location.protocol === 'file:') {
   // config local con URL + token (archivo hermano vigia_config.local.js)
