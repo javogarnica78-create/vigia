@@ -124,7 +124,7 @@
     <div class="card tile">
       <div class="lbl">Por analizar</div>
       <div class="val" id="kPend">–</div>
-      <div class="note">fotos en cola (se analizan cada 5 min)</div>
+      <div class="note">fotos de puerta esperando análisis de Gemini</div>
     </div>
     <div class="card tile">
       <div class="lbl">Llegadas</div>
@@ -243,13 +243,23 @@ function muestrasHost(filas) {
     const k = r[2] + '|' + r[0] + '|' + r[3];
     (grupos[k] = grupos[k] || []).push({ fecha: r[0], hora: r[1], tienda: r[2], s: segDe(r[1]), presente: r[6] === 'STAFF' || (r[9] || 0) > 0, foto: r[11] });
   });
-  const out = [];
+  // 1) medición local por minuto (la buena): manda sobre las fotos donde exista para esa tienda y día
+  const out = [], conLocal = new Set();
+  (DATA.presencia || []).forEach(p => {
+    if ($('tienda').value && p[2] !== $('tienda').value) return;
+    if (!p[5]) return;
+    conLocal.add(p[2] + '|' + p[0]);
+    const si = p[4] / 60, no = (p[5] - p[4]) / 60;
+    out.push({ fecha: p[0], hora: p[1], tienda: p[2], s: segDe(p[1]) - p[5], min: p[5] / 60, si, no, presente: si >= no, local: true, foto: '' });
+  });
+  // 2) fotos analizadas por Gemini (respaldo, solo días sin medición local)
   Object.values(grupos).forEach(g => {
+    if (conLocal.has(g[0].tienda + '|' + g[0].fecha)) return;
     g.sort((a, b) => a.s - b.s);
     const gaps = [];
     for (let i = 0; i < g.length - 1; i++) gaps.push(Math.min((g[i + 1].s - g[i].s) / 60, DATA.hostGapMaxMin));
     const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 2;
-    g.forEach((m, i) => { m.min = i < gaps.length ? gaps[i] : med; out.push(m); });
+    g.forEach((m, i) => { m.min = i < gaps.length ? gaps[i] : med; m.si = m.presente ? m.min : 0; m.no = m.presente ? 0 : m.min; out.push(m); });
   });
   return out;
 }
@@ -276,21 +286,22 @@ function render() {
   const Mp = M.filter(m => enP(m.fecha)), Ep = E.filter(e => enP(e.fecha));
 
   // KPIs host
-  const si = Mp.filter(m => m.presente).reduce((a, m) => a + m.min, 0);
-  const no = Mp.filter(m => !m.presente).reduce((a, m) => a + m.min, 0);
+  const si = Mp.reduce((a, m) => a + m.si, 0);
+  const no = Mp.reduce((a, m) => a + m.no, 0);
   const tot = si + no;
+  const nLocal = Mp.filter(m => m.local).length;
   $('kPct').textContent = tot ? pct(si / tot) : '–';
   $('kSi').textContent = tot ? fmtMin(si) : '–';
   $('kNo').textContent = tot ? fmtMin(no) : '–';
-  $('kMon').textContent = tot ? `Monitoreado: ${fmtMin(tot)} · ${Mp.length} fotos` : 'Sin fotos analizadas en este periodo';
+  $('kMon').textContent = tot ? `Monitoreado: ${fmtMin(tot)} · ${nLocal ? 'medido cada 5 s' : Mp.length + ' fotos (método anterior)'}` : 'Sin medición en este periodo';
   $('kBar').innerHTML = tot ? `<i style="width:${si / tot * 100}%;background:var(--good)"></i><i style="width:${no / tot * 100}%;background:var(--bad)"></i>` : '';
 
   // en vivo
   const hoyM = M.filter(m => m.fecha === hoy).sort((a, b) => b.s - a.s);
   if (hoyM.length) {
-    const u = hoyM[0], hace = Math.max(0, Math.round((segDe(DATA.ahora.slice(11)) - u.s) / 60));
+    const u = hoyM[0], fin = u.s + u.min * 60, hace = Math.max(0, Math.round((segDe(DATA.ahora.slice(11)) - fin) / 60));
     $('kLive').innerHTML = `<span class="dot" style="--c:${u.presente ? 'var(--good)' : 'var(--bad)'}"></span>${u.presente ? 'Con host' : 'Vacía'}`;
-    $('kLiveNote').innerHTML = `última foto analizada hace ${hace} min · <a href="${u.foto}" target="_blank">ver</a>`;
+    $('kLiveNote').innerHTML = u.local ? `último minuto medido hace ${hace} min${hace > 3 ? ' · <b style="color:var(--bad)">¿se detuvo la captura?</b>' : ''}` : `última foto analizada hace ${hace} min · <a href="${u.foto}" target="_blank">ver</a>`;
   } else { $('kLive').innerHTML = '<span class="dot" style="--c:var(--muted)"></span>Sin dato hoy'; $('kLiveNote').textContent = '¿está corriendo la página de captura?'; }
   $('kPend').textContent = filas.filter(r => r[5] === 'PENDIENTE').length;
 
@@ -334,7 +345,7 @@ function renderStrip(m) {
     i.style.left = ((x.s - s0) / span * 100) + '%';
     i.style.width = Math.max(0.15, x.min * 60 / span * 100) + '%';
     i.style.background = x.presente ? 'var(--good)' : 'var(--bad)';
-    i.dataset.tip = `${x.hora.slice(0, 5)} · ${x.presente ? 'Con host' : 'Vacía'} · cubre ${Math.round(x.min)} min`;
+    i.dataset.tip = x.local ? `${x.hora.slice(0, 5)} · ${Math.round(x.si / x.min * 100)}% del minuto con host` : `${x.hora.slice(0, 5)} · ${x.presente ? 'Con host' : 'Vacía'} · cubre ${Math.round(x.min)} min`;
     el.appendChild(i);
   });
   const hs = []; for (let s = s0; s <= s1; s += 3600) hs.push(`<span>${String(s / 3600).padStart(2, '0')}:00</span>`);
@@ -365,7 +376,7 @@ function barras(el, items, opts) {
 
 function renderHora(Mp, lleg) {
   const hs = {}, ls_ = {};
-  Mp.forEach(m => { const h = Math.floor(m.s / 3600); hs[h] = hs[h] || { si: 0, t: 0 }; hs[h].t += m.min; if (m.presente) hs[h].si += m.min; });
+  Mp.forEach(m => { const h = Math.floor((m.s + m.min * 30) / 3600); hs[h] = hs[h] || { si: 0, t: 0 }; hs[h].t += m.si + m.no; hs[h].si += m.si; });
   lleg.forEach(e => { const h = Math.floor(segDe(e.hora) / 3600); ls_[h] = (ls_[h] || 0) + e.personas; });
   const horas = [...new Set([...Object.keys(hs), ...Object.keys(ls_)].map(Number))].sort((a, b) => a - b);
   const lo = horas.length ? horas[0] : 11, hi = horas.length ? horas[horas.length - 1] : 22;
@@ -376,7 +387,7 @@ function renderHora(Mp, lleg) {
 
 function renderDias(M, ini, fin, hoy) {
   const ds = {};
-  M.forEach(m => { ds[m.fecha] = ds[m.fecha] || { si: 0, t: 0 }; ds[m.fecha].t += m.min; if (m.presente) ds[m.fecha].si += m.min; });
+  M.forEach(m => { ds[m.fecha] = ds[m.fecha] || { si: 0, t: 0 }; ds[m.fecha].t += m.si + m.no; ds[m.fecha].si += m.si; });
   const items = [];
   for (let i = 29; i >= 0; i--) {
     const f = iso(new Date(new Date(hoy + 'T12:00:00Z').getTime() - i * 86400000)), d = ds[f];
@@ -388,7 +399,7 @@ function renderDias(M, ini, fin, hoy) {
 function renderTabla(M, E) {
   const ds = {};
   const k = (f, t) => (ds[f + '|' + t] = ds[f + '|' + t] || { f, t, si: 0, tot: 0, lleg: 0, pers: 0, atS: 0, atN: 0, fail: 0 });
-  M.forEach(m => { const a = k(m.fecha, m.tienda); a.tot += m.min; if (m.presente) a.si += m.min; });
+  M.forEach(m => { const a = k(m.fecha, m.tienda); a.tot += m.si + m.no; a.si += m.si; });
   E.filter(e => e.tipo === 'LLEGADA').forEach(e => { const a = k(e.fecha, e.tienda); a.lleg++; a.pers += e.personas; if (e.seg != null) { a.atS += e.seg; a.atN++; } if (e.res === 'FAIL') a.fail++; });
   const rows = Object.values(ds).sort((a, b) => b.f.localeCompare(a.f) || a.t.localeCompare(b.t)).slice(0, 31);
   $('tabla').innerHTML = rows.length ? `<thead><tr><th>Día</th><th>Tienda</th><th>Cubierta</th><th>Monitoreado</th><th>Personas</th><th>Atención</th><th>FAIL</th></tr></thead><tbody>` +

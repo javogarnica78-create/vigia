@@ -80,8 +80,10 @@
 
     <h2>2 · Dibujar áreas</h2>
     <button id="btnQHost" class="big" style="border-left:6px solid #3b82f6">① Área HOSTESS<br><span class="mini">dónde debe estar la host · foto cada X min</span></button>
-    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">al cruzar alguien: 10 fotos, una cada 2 s</span></button>
+    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">cuando se abre la puerta: 6 fotos de todo el contexto, una cada 6 s</span></button>
     <div class="mini" id="zonaHint" style="color:#ffb020;font-size:13px"></div>
+    <button id="btnRef" class="big" style="border-left:6px solid #3b82f6">③ Marcar estación VACÍA<br><span class="mini">clic cuando NO haya nadie en el área ①: la página mide presencia sola, sin Gemini</span></button>
+    <div class="row"><span class="pill" id="pillHost">host: sin referencia</span><span class="mini" id="hostHoy"></span></div>
     <div id="zonas" style="display:flex;flex-direction:column;gap:6px"></div>
     <details><summary>+ Más zonas (cuarto frío, otras)</summary>
       <div class="row" style="margin-top:6px">
@@ -92,13 +94,17 @@
     </details>
 
     <h2>3 · Parámetros</h2>
-    <details><summary>HOST · foto por tiempo</summary>
-      <div class="grid2"><label>Cada <input type="number" id="presMin" value="2" min="1" max="120"> min</label></div>
+    <details><summary>HOST · presencia local + foto de auditoría</summary>
+      <div class="grid2">
+        <label>Foto auditoría cada <input type="number" id="presMin" value="30" min="1" max="240"> min</label>
+        <label>Sensibilidad presencia <input type="number" id="umbHost" value="12" min="2" max="80"> %</label>
+      </div>
+      <div class="mini">Presente = más de ese % del área ① distinto a la foto de estación vacía.</div>
     </details>
     <details><summary>PUERTA / OTRA · ráfaga fija</summary>
       <div class="grid2">
-        <label>Fotos <input type="number" id="rafN" value="10" min="1" max="16"></label>
-        <label>Cada <input type="number" id="rafSeg" value="2" min="1" max="120"> s</label>
+        <label>Fotos <input type="number" id="rafN" value="6" min="1" max="16"></label>
+        <label>Cada <input type="number" id="rafSeg" value="6" min="1" max="120"> s</label>
         <label>Pausa después <input type="number" id="coolP" value="20" min="0" max="900"> s</label>
       </div>
     </details>
@@ -110,9 +116,11 @@
         <label>Pausa después <input type="number" id="coolF" value="20" min="0" max="900"> s</label>
       </div>
     </details>
-    <div class="row"><label>Umbral movimiento <input type="number" id="umbral" value="3" min="0.5" max="50" step="0.5"> % píxeles</label></div>
+    <div class="row"><label>Umbral movimiento <input type="number" id="umbral" value="8" min="0.5" max="60" step="0.5"> % píxeles</label></div>
 
     <h2>4 · Correr</h2>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--txt)"><input type="checkbox" id="modoPrueba"> <b>Modo prueba</b>: no sube fotos ni gasta Gemini, solo muestra abajo qué dispararía</label>
+    <div id="pruebas" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px"></div>
     <button id="btnStart" class="primary" disabled>Iniciar fotos</button>
     <button id="btnStop" class="danger" disabled>Detener</button>
     <button id="btnAnalizar">Analizar pendientes ahora</button>
@@ -186,6 +194,7 @@ function srv(fn, ...args) {
   else if (fn === 'guardarAreas') body = { accion: 'areas', tienda: args[0], areas: args[1], token };
   else if (fn === 'analizarPendientes') body = { accion: 'analizar', token };
   else if (fn === 'ping') body = { accion: 'ping', token };
+  else if (fn === 'presencia') body = Object.assign({ accion: 'presencia' }, args[0]);
   else return Promise.resolve(null);
   // Apps Script responde JSON legible por CORS con text/plain (petición simple): así vemos errores reales
   return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
@@ -388,7 +397,21 @@ function capturarConZonas(maxW) {
 function subir(z, modo, motivo, evento, recorte) {
   const T = TIPOS[z.tipo] || TIPOS.OTRA;
   if (congelada) { log(`${z.nombre}: foto NO enviada (captura congelada)`, 'e'); return; }
-  const d = recorte ? capturar(z.rect, 1024) : (z.tipo === 'FRIO' ? capturar(z.rect, 1024) : capturarConZonas(1280));
+  if ($('modoPrueba').checked) {
+    // modo prueba: miniatura local, nada se sube
+    const th = capturar(null, 320);
+    if (!th) return;
+    stats.fotos++; $('sFotos').textContent = stats.fotos;
+    const box = $('pruebas'), fig = document.createElement('figure');
+    fig.style.margin = 0;
+    fig.innerHTML = `<img src="${th}" style="width:100%;border-radius:4px;display:block"><figcaption class="mini">${new Date().toLocaleTimeString('es-MX', { hour12: false })} ${z.nombre} · ${motivo.split('·')[0]}</figcaption>`;
+    box.prepend(fig);
+    while (box.children.length > 12) box.lastChild.remove();
+    log(`[prueba] ${z.nombre}: dispararía foto · ${motivo}`);
+    return;
+  }
+  // HOST también va con cuadro completo: la host se para junto al podio y un recorte la dejaba fuera ("vacía" falsa)
+  const d = z.tipo === 'FRIO' ? capturar(z.rect, 1024) : capturarConZonas(z.tipo === 'HOST' ? 1024 : 1280);
   if (!d) return;
   stats.fotos++; $('sFotos').textContent = stats.fotos;
   const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts: Date.now() };
@@ -412,7 +435,8 @@ function iniciarRafaga(z, pct) {
   const tomar = () => {
     if (!running || !r.evento || r.evento.id !== evento) return;
     r.evento.i++;
-    subir(z, z.tipo, `movimiento ${pct.toFixed(1)}% · foto ${r.evento.i}/${n} · cada ${seg}s`, evento, false);
+    const hostAhora = refHost && ultimoEstado !== null ? (ultimoEstado ? 'estación host OCUPADA' : 'estación host VACÍA') : 'estación host sin medir';
+    subir(z, z.tipo, `puerta abierta · foto ${r.evento.i}/${n} · cada ${seg}s · ${hostAhora}`, evento, false);
     if (r.evento.i < n) setTimeout(tomar, seg * 1000);
     else { r.evento = null; r.cool = Date.now() + num('coolP', 90) * 1000; r.prev = null; pintar(); }
   };
@@ -462,12 +486,76 @@ function medir() {
     const m = $('zm' + idx); if (m) m.style.width = Math.min(100, pct * 4) + '%';
     const st = $('zst' + idx); if (st && !r.evento) st.textContent = `${T.label} · mov ${pct.toFixed(1)}%${now < r.cool ? ' · pausa' : ''}`;
     if (r.evento && T.disparo === 'actividad' && pct >= umbral) r.evento.ultimoMov = now;
-    if (!r.evento && pct >= umbral && now > r.cool && now > warmupUntil) {
+    // movimiento SOSTENIDO: 3 muestras seguidas (~1.2 s) sobre el umbral; un parpadeo o alguien pasando de lado no dispara
+    r.seguidas = pct >= umbral ? (r.seguidas || 0) + 1 : 0;
+    if (!r.evento && r.seguidas >= 3 && now > r.cool && now > warmupUntil) {
       if (T.disparo === 'actividad') iniciarActividad(z, pct); else iniciarRafaga(z, pct);
     }
   });
 }
 let warmupUntil = 0;
+
+// ── PRESENCIA DE HOST LOCAL (sin Gemini): compara el área ① contra una foto de la estación vacía
+let refHost = null, presTick = null, acc = { si: 0, tot: 0, difs: [], desde: Date.now() }, ultimoEstado = null;
+const pz = document.createElement('canvas'), pzx = pz.getContext('2d', { willReadFrequently: true });
+pz.width = 64; pz.height = 64;
+function zonaHost() { return zonas.find(z => z.tipo === 'HOST' && z.rect); }
+function grisZona(rect) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  pzx.drawImage(video, rect.x * vw, rect.y * vh, Math.max(1, rect.w * vw), Math.max(1, rect.h * vh), 0, 0, 64, 64);
+  const px = pzx.getImageData(0, 0, 64, 64).data, g = new Uint8Array(64 * 64);
+  for (let i = 0, j = 0; i < px.length; i += 4, j++) g[j] = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+  return g;
+}
+let refTienda = null;
+function cargarRef() {
+  // lee la referencia guardada; si no hay guardada pero ya se marcó en esta sesión para la misma tienda, la conserva
+  try {
+    const s = ls('vigia_ref_' + tienda());
+    if (s) { refHost = Uint8Array.from(atob(s), c => c.charCodeAt(0)); refTienda = tienda(); }
+    else if (refTienda !== tienda()) refHost = null;
+  } catch (e) { if (refTienda !== tienda()) refHost = null; }
+  $('pillHost').textContent = refHost ? 'host: referencia lista' : 'host: falta marcar estación vacía (③)';
+}
+function marcarVacia() {
+  const z = zonaHost();
+  if (!stream) { setErr('Primero elige la ventana de la cámara.'); return; }
+  if (!z) { setErr('Primero dibuja el área ① HOSTESS.'); return; }
+  refHost = grisZona(z.rect); refTienda = tienda();
+  ls('vigia_ref_' + tienda(), btoa(String.fromCharCode(...refHost)));
+  setErr(''); log('Referencia de estación vacía guardada. Desde ahora se mide presencia cada 5 s.', 'k');
+  $('pillHost').textContent = 'host: referencia lista';
+}
+function hoyKey() { return 'vigia_hoy_' + tienda() + '_' + new Date().toLocaleDateString('en-CA'); }
+function pintarHoy() {
+  let h = {}; try { h = JSON.parse(ls(hoyKey()) || '{}'); } catch (e) {}
+  const si = h.si || 0, tot = h.tot || 0;
+  const f = s => { const m = Math.round(s / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`; };
+  $('hostHoy').textContent = tot ? `Hoy: ${Math.round(si / tot * 100)}% con host · ${f(si)} con host · ${f(tot - si)} vacía` : '';
+}
+function tickPresencia() {
+  const z = zonaHost();
+  if (!running || !refHost || !z || congelada || !video.videoWidth) return;
+  const g = grisZona(z.rect);
+  let ch = 0; for (let i = 0; i < g.length; i++) if (Math.abs(g[i] - refHost[i]) > 30) ch++;
+  const pct = ch * 100 / g.length, presente = pct >= num('umbHost', 12);
+  acc.tot += 5; if (presente) acc.si += 5; acc.difs.push(Math.round(pct));
+  const pill = $('pillHost');
+  pill.textContent = `host: ${presente ? 'OCUPADO' : 'VACÍO'} (${pct.toFixed(0)}%)`;
+  pill.style.color = presente ? 'var(--ok)' : 'var(--bad)'; pill.style.borderColor = pill.style.color;
+  if (ultimoEstado !== null && ultimoEstado !== presente) log(`Estación host: ${presente ? 'OCUPADA' : 'VACÍA'}`, presente ? 'k' : 'e');
+  ultimoEstado = presente;
+  // acumulado del día (local, para verlo aunque no haya conexión)
+  let h = {}; try { h = JSON.parse(ls(hoyKey()) || '{}'); } catch (e) {}
+  h.tot = (h.tot || 0) + 5; if (presente) h.si = (h.si || 0) + 5; ls(hoyKey(), JSON.stringify(h));
+  pintarHoy();
+  // cada minuto: una fila al servidor (sin foto, sin Gemini)
+  if (acc.tot >= 60) {
+    const fila = { tienda: tienda(), zona: z.nombre, ts: Date.now(), seg_presente: acc.si, seg_total: acc.tot, dif_prom: Math.round(acc.difs.reduce((a, b) => a + b, 0) / acc.difs.length) };
+    acc = { si: 0, tot: 0, difs: [], desde: Date.now() };
+    if (!$('modoPrueba').checked) srv('presencia', fila).catch(e => log('presencia no guardada: ' + e.message, 'e'));
+  }
+}
 
 // ── detector de captura congelada: la cámara trae reloj en pantalla, así que un cuadro idéntico por 60 s = congelada
 let congelada = false, prevFull = null, igualesDesde = Date.now(), freezeTimer = null;
@@ -501,6 +589,9 @@ function iniciar() {
   running = true; rt = {}; warmupUntil = Date.now() + 3000;
   congelada = false; prevFull = null; igualesDesde = Date.now();
   clearInterval(freezeTimer); freezeTimer = setInterval(revisarCongelada, 5000);
+  cargarRef(); acc = { si: 0, tot: 0, difs: [], desde: Date.now() }; ultimoEstado = null;
+  clearInterval(presTick); presTick = setInterval(tickPresencia, 5000);
+  if (!refHost) log('Falta marcar la estación vacía (botón ③) para medir presencia de host.', 'e');
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
   $('btnStart').disabled = true; $('btnStop').disabled = false;
   ls('vigia_tienda', tienda());
@@ -517,7 +608,7 @@ function iniciar() {
 function detener(silencioso) {
   running = false;
   Object.values(rt).forEach(r => r.evento = null);
-  clearInterval(presTimer); clearInterval(motionTimer); clearInterval(freezeTimer); presTimer = motionTimer = freezeTimer = null;
+  clearInterval(presTimer); clearInterval(motionTimer); clearInterval(freezeTimer); clearInterval(presTick); presTimer = motionTimer = freezeTimer = presTick = null;
   $('pillRun').textContent = 'detenido'; $('pillRun').classList.remove('on');
   $('btnStart').disabled = !stream; $('btnStop').disabled = true;
   pintar(); if (!silencioso) log('Detenido.');
@@ -538,6 +629,7 @@ async function analizar() {
 Object.keys(TIPOS).forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = TIPOS[k].label; $('zTipo').appendChild(o); });
 $('btnCam').onclick = elegirPantalla;
 $('btnStart').onclick = iniciar;
+$('btnRef').onclick = marcarVacia;
 $('btnStop').onclick = () => detener();
 $('btnAnalizar').onclick = analizar;
 $('tienda').addEventListener('change', () => { ls('vigia_tienda', tienda()); cargarConfig(); });
