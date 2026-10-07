@@ -80,7 +80,7 @@
 
     <h2>2 · Dibujar áreas</h2>
     <button id="btnQHost" class="big" style="border-left:6px solid #3b82f6">① Área HOSTESS<br><span class="mini">dónde debe estar la host · foto cada X min</span></button>
-    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">al cruzar alguien: 6 fotos, una cada 5 s</span></button>
+    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">al cruzar alguien: 10 fotos, una cada 2 s</span></button>
     <div class="mini" id="zonaHint" style="color:#ffb020;font-size:13px"></div>
     <div id="zonas" style="display:flex;flex-direction:column;gap:6px"></div>
     <details><summary>+ Más zonas (cuarto frío, otras)</summary>
@@ -97,8 +97,8 @@
     </details>
     <details><summary>PUERTA / OTRA · ráfaga fija</summary>
       <div class="grid2">
-        <label>Fotos <input type="number" id="rafN" value="6" min="1" max="12"></label>
-        <label>Cada <input type="number" id="rafSeg" value="5" min="2" max="120"> s</label>
+        <label>Fotos <input type="number" id="rafN" value="10" min="1" max="16"></label>
+        <label>Cada <input type="number" id="rafSeg" value="2" min="1" max="120"> s</label>
         <label>Pausa después <input type="number" id="coolP" value="20" min="0" max="900"> s</label>
       </div>
     </details>
@@ -358,9 +358,18 @@ function capturar(rect, maxW) {
   wctx.drawImage(video, sx, sy, sw, sh, 0, 0, work.width, work.height);
   return work.toDataURL('image/jpeg', 0.75);
 }
+// recorte que junta todas las áreas dibujadas (puerta + host) con margen: más nítido y más barato que el cuadro completo
+function recorteUnion() {
+  const rs = zonas.filter(z => z.rect).map(z => z.rect);
+  if (!rs.length) return null;
+  const m = 0.04;
+  const x0 = Math.max(0, Math.min(...rs.map(r => r.x)) - m), y0 = Math.max(0, Math.min(...rs.map(r => r.y)) - m);
+  const x1 = Math.min(1, Math.max(...rs.map(r => r.x + r.w)) + m), y1 = Math.min(1, Math.max(...rs.map(r => r.y + r.h)) + m);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
 function subir(z, modo, motivo, evento, recorte) {
   const T = TIPOS[z.tipo] || TIPOS.OTRA;
-  const d = capturar(recorte ? z.rect : null, recorte ? 1024 : 1280);
+  const d = recorte ? capturar(z.rect, 1024) : capturar(z.tipo === 'FRIO' ? z.rect : recorteUnion(), 1024);
   if (!d) return;
   stats.fotos++; $('sFotos').textContent = stats.fotos;
   const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts: Date.now() };

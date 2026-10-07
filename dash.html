@@ -147,6 +147,11 @@
       <div class="note" id="kSalNote">–</div>
     </div>
     <div class="card tile">
+      <div class="lbl">Mano en el corazón</div>
+      <div class="val" id="kMano">–</div>
+      <div class="note" id="kManoNote">al recibir y despedir</div>
+    </div>
+    <div class="card tile">
       <div class="lbl">Empleados entrando / saliendo</div>
       <div class="val" id="kEmp">–</div>
       <div class="note">descontados de las llegadas</div>
@@ -186,7 +191,7 @@
       <div class="scroll"><table id="tabla"></table></div>
     </div>
     <div class="card">
-      <h2>Últimas llegadas</h2>
+      <h2>Últimas llegadas y salidas</h2>
       <div id="eventos"></div>
     </div>
   </section>
@@ -252,7 +257,7 @@ function eventosPuerta(filas) {
   const ev = {};
   filas.forEach(r => {
     if (!['PUERTA', 'MOVIMIENTO', 'OTRA'].includes(r[4]) || r[5] !== 'ANALIZADO') return;
-    if (!ev[r[10]] || r[1] < ev[r[10]].hora) ev[r[10]] = { fecha: r[0], hora: r[1], tienda: r[2], tipo: r[6], res: r[7], seg: r[8], personas: r[9] || 0, foto: r[11], resumen: r[12] };
+    if (!ev[r[10]] || r[1] < ev[r[10]].hora) ev[r[10]] = { fecha: r[0], hora: r[1], tienda: r[2], tipo: r[6], res: r[7], seg: r[8], personas: r[9] || 0, foto: r[11], resumen: r[12], mano: r[13] || '' };
   });
   return Object.values(ev);
 }
@@ -302,12 +307,17 @@ function render() {
   $('kSal').textContent = sal.reduce((a, e) => a + e.personas, 0);
   $('kSalNote').textContent = `personas en ${sal.length} grupos`;
   $('kEmp').textContent = Ep.filter(e => e.tipo === 'EMPLEADO').reduce((a, e) => a + (e.personas || 1), 0);
+  const conGesto = [...lleg, ...sal].filter(e => e.mano === 'SI' || e.mano === 'NO');
+  const siG = conGesto.filter(e => e.mano === 'SI').length, noG = conGesto.length - siG;
+  const noVis = [...lleg, ...sal].filter(e => e.mano === 'NO_VISIBLE').length;
+  $('kMano').textContent = conGesto.length ? pct(siG / conGesto.length) : '–';
+  $('kManoNote').textContent = conGesto.length ? `${siG} sí · ${noG} sin gesto${noVis ? ' · ' + noVis + ' no visible' : ''}` : 'sin llegadas/salidas evaluadas';
 
   renderStrip(hoyM.slice().reverse());
   renderHora(Mp, lleg);
   renderDias(M, ini, fin, hoy);
   renderTabla(M, E);
-  renderEventos(E.filter(e => e.tipo === 'LLEGADA').sort((a, b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora)).slice(0, 12));
+  renderEventos(E.filter(e => e.tipo === 'LLEGADA' || e.tipo === 'SALIDA').sort((a, b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora)).slice(0, 12));
 
   const tiendas = [...new Set(DATA.filas.map(r => r[2]))].length;
   $('sub').textContent = `Actualizado ${DATA.ahora.slice(11, 16)} · ${ini === fin ? ini : ini + ' → ' + fin} · se refresca cada minuto`;
@@ -387,7 +397,8 @@ function renderTabla(M, E) {
 }
 
 function renderEventos(L) {
-  $('eventos').innerHTML = L.length ? L.map(e => `<div class="ev"><div class="t">${e.hora.slice(0, 5)}<br><span style="font-size:11px">${e.fecha.slice(5)}</span></div><div>${e.personas} persona${e.personas === 1 ? '' : 's'}${e.seg != null ? ' · atendidos en ' + e.seg + ' s' : ''}<br><span style="color:var(--ink2);font-size:12px">${e.resumen || ''}</span></div><div style="text-align:right"><div class="r ${e.res === 'FAIL' ? 'fail' : 'pass'}">${e.res === 'FAIL' ? '✕ FAIL' : '✓ OK'}</div><a href="${e.foto}" target="_blank" style="font-size:12px">foto</a></div></div>`).join('')
+  const manoTxt = m => m === 'SI' ? ' · ❤️ mano en el corazón' : m === 'NO' ? ' · <b style="color:var(--bad)">sin mano en el corazón</b>' : m === 'NO_VISIBLE' ? ' · gesto no visible' : '';
+  $('eventos').innerHTML = L.length ? L.map(e => `<div class="ev"><div class="t">${e.hora.slice(0, 5)}<br><span style="font-size:11px">${e.fecha.slice(5)}</span></div><div><b>${e.tipo === 'SALIDA' ? 'Salida' : 'Llegada'}</b> · ${e.personas} persona${e.personas === 1 ? '' : 's'}${e.seg != null ? ' · atendidos en ' + e.seg + ' s' : ''}${manoTxt(e.mano)}<br><span style="color:var(--ink2);font-size:12px">${e.resumen || ''}</span></div><div style="text-align:right"><div class="r ${e.res === 'FAIL' ? 'fail' : 'pass'}">${e.res === 'FAIL' ? '✕ FAIL' : '✓ OK'}</div><a href="${e.foto}" target="_blank" style="font-size:12px">foto</a></div></div>`).join('')
     : '<div class="empty">Sin llegadas analizadas todavía</div>';
 }
 
