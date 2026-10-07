@@ -80,7 +80,7 @@
 
     <h2>2 · Dibujar áreas</h2>
     <button id="btnQHost" class="big" style="border-left:6px solid #3b82f6">① Área HOSTESS<br><span class="mini">dónde debe estar la host · foto cada X min</span></button>
-    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">cuando se abre la puerta: 6 fotos de todo el contexto, una cada 6 s</span></button>
+    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">cuando se abre la puerta: 15 fotos de todo el contexto, una por segundo</span></button>
     <div class="mini" id="zonaHint" style="color:#ffb020;font-size:13px"></div>
     <button id="btnRef" class="big" style="border-left:6px solid #3b82f6">③ Marcar estación VACÍA<br><span class="mini">clic cuando NO haya nadie en el área ①: la página revisa cada 15 s si está ocupada, sin Gemini</span></button>
     <div class="row"><span class="pill" id="pillHost">host: sin referencia</span><span class="mini" id="hostHoy"></span></div>
@@ -104,8 +104,8 @@
     </details>
     <details><summary>PUERTA / OTRA · ráfaga fija</summary>
       <div class="grid2">
-        <label>Fotos <input type="number" id="rafN" value="6" min="1" max="16"></label>
-        <label>Cada <input type="number" id="rafSeg" value="6" min="1" max="120"> s</label>
+        <label>Fotos <input type="number" id="rafN" value="15" min="1" max="30"></label>
+        <label>Cada <input type="number" id="rafSeg" value="1" min="1" max="120"> s</label>
         <label>Pausa después <input type="number" id="coolP" value="20" min="0" max="900"> s</label>
       </div>
     </details>
@@ -412,7 +412,8 @@ function subir(z, modo, motivo, evento, recorte) {
     return;
   }
   // HOST también va con cuadro completo: la host se para junto al podio y un recorte la dejaba fuera ("vacía" falsa)
-  const d = z.tipo === 'FRIO' ? capturar(z.rect, 1024) : capturarConZonas(z.tipo === 'HOST' ? 1024 : 1280);
+  // ráfaga de 1 foto/s: 960 px de ancho basta para ver gestos y pesa la mitad
+  const d = z.tipo === 'FRIO' ? capturar(z.rect, 1024) : capturarConZonas(z.tipo === 'HOST' ? 1024 : 960);
   if (!d) return;
   stats.fotos++; $('sFotos').textContent = stats.fotos;
   const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts: Date.now() };
