@@ -99,6 +99,7 @@
         <label>Foto auditoría cada <input type="number" id="presMin" value="30" min="1" max="240"> min</label>
         <label>Sensibilidad presencia <input type="number" id="umbHost" value="12" min="2" max="80"> %</label>
         <label>Revisar presencia cada <input type="number" id="presSeg" value="15" min="5" max="120"> s</label>
+        <label>Foto si hay <input type="number" id="grupoN" value="3" min="1" max="20"> personas o más</label>
       </div>
       <div class="mini">Presente = más de ese % del área ① distinto a la foto de estación vacía.</div>
     </details>
@@ -140,6 +141,9 @@
   </aside>
 </main>
 
+<!-- detector de personas local (corre en el navegador, sin Gemini ni internet después de cargar) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <script>
 // ───────────────────────────────────────────── tipos de zona ──
 // disparo: 'tiempo' = foto programada · 'rafaga' = movimiento → N fotos fijas · 'actividad' = movimiento → sigue hasta quietud
@@ -374,6 +378,8 @@ function pintar() {
     octx.fillStyle = color; octx.font = 'bold 12px system-ui'; octx.fillText(label, x + 4, y + 14);
   };
   zonas.forEach(z => { const T = TIPOS[z.tipo] || TIPOS.OTRA; const r = rt[z.nombre]; draw(z.rect, T.color, `${z.nombre} · ${z.tipo}`, !!(r && r.evento)); });
+  // personas detectadas: verde = cuenta para la host, gris = fuera del área
+  (typeof ultCajas !== 'undefined' ? ultCajas : []).forEach(b => draw(b, b.dentro ? '#3ddc84' : '#9aa3b2', b.dentro ? 'persona' : ''));
   if (drawing && dragStart && dragNow) { const z = zonas[drawing.idx]; const T = TIPOS[z && z.tipo] || TIPOS.OTRA; draw(rectFrom(dragStart, dragNow), T.color, '…'); }
 }
 
@@ -556,15 +562,53 @@ function pintarHoy() {
   const f = s => { const m = Math.round(s / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`; };
   $('hostHoy').textContent = tot ? `Hoy: ${Math.round(si / tot * 100)}% con host · ${f(si)} con host · ${f(tot - si)} vacía` : '';
 }
-function tickPresencia() {
+// ── detector de personas (COCO-SSD) — si no carga, se usa la comparación contra la estación vacía
+var modelo = null, detBusy = false, ultCajas = [], ultGrupo = 0;   // var: pintar() las lee y puede correr antes
+try {
+  if (window.cocoSsd) cocoSsd.load({ base: 'lite_mobilenet_v2' }).then(m => { modelo = m; log('Detector de personas listo (local, sin Gemini).', 'k'); }).catch(e => log('Detector de personas no cargó: se usa comparación de imagen. ' + e.message, 'e'));
+} catch (e) {}
+async function personasEnZona(rect) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const det = await modelo.detect(video, 20, 0.4);
+  const zx0 = rect.x * vw, zy0 = rect.y * vh, zx1 = zx0 + rect.w * vw, zy1 = zy0 + rect.h * vh;
+  ultCajas = [];
+  let n = 0;
+  det.filter(d => d.class === 'person').forEach(d => {
+    const [x, y, w, h] = d.bbox;
+    const ix = Math.max(0, Math.min(x + w, zx1) - Math.max(x, zx0)), iy = Math.max(0, Math.min(y + h, zy1) - Math.max(y, zy0));
+    const dentro = (ix * iy) / (w * h) >= 0.3;   // al menos 30% de la persona dentro del área de host
+    if (dentro) n++;
+    ultCajas.push({ x: x / vw, y: y / vh, w: w / vw, h: h / vh, dentro });
+  });
+  pintar();
+  return n;
+}
+
+async function tickPresencia() {
   const z = zonaHost();
-  if (!running || !refHost || !z || congelada || !video.videoWidth) return;
-  const g = grisZona(z.rect);
-  let ch = 0; for (let i = 0; i < g.length; i++) if (Math.abs(g[i] - refHost[i]) > 30) ch++;
-  const pct = ch * 100 / g.length, presente = pct >= num('umbHost', 12), paso = pasoPres();
-  acc.tot += paso; if (presente) acc.si += paso; acc.difs.push(Math.round(pct));
+  if (!running || !z || congelada || !video.videoWidth || detBusy) return;
+  if (!modelo && !refHost) return;
+  detBusy = true;
+  let presente, pct, n = null;
+  try {
+    if (modelo) { n = await personasEnZona(z.rect); presente = n >= 1; pct = n; }
+    else {
+      const g = grisZona(z.rect);
+      let ch = 0; for (let i = 0; i < g.length; i++) if (Math.abs(g[i] - refHost[i]) > 30) ch++;
+      pct = ch * 100 / g.length; presente = pct >= num('umbHost', 12);
+    }
+  } catch (e) { detBusy = false; log('detector: ' + e.message, 'e'); return; }
+  detBusy = false;
+  const paso = pasoPres();
+  acc.tot += paso; if (presente) acc.si += paso; acc.difs.push(Math.round(pct)); acc.nmax = Math.max(acc.nmax || 0, n || 0);
+  // N o más personas en la host (default 3) → una foto de todo el contexto (pausa de 2 min para no repetir)
+  if (n !== null && n >= num('grupoN', 3) && Date.now() - ultGrupo > 120000) {
+    ultGrupo = Date.now();
+    log(`${n} personas en la host → foto`, 'k');
+    subir(z, 'HOST', `${n} personas en host (${num('grupoN', 3)} o más)`, 'G_' + Date.now(), false);
+  }
   const pill = $('pillHost');
-  pill.textContent = `host: ${presente ? 'OCUPADO' : 'VACÍO'} (${pct.toFixed(0)}%)`;
+  pill.textContent = n !== null ? `host: ${n === 0 ? 'VACÍO' : n + (n === 1 ? ' persona' : ' personas')}` : `host: ${presente ? 'OCUPADO' : 'VACÍO'} (${pct.toFixed(0)}%)`;
   pill.style.color = presente ? 'var(--ok)' : 'var(--bad)'; pill.style.borderColor = pill.style.color;
   if (ultimoEstado !== null && ultimoEstado !== presente) log(`Estación host: ${presente ? 'OCUPADA' : 'VACÍA'}`, presente ? 'k' : 'e');
   ultimoEstado = presente;
@@ -574,8 +618,8 @@ function tickPresencia() {
   pintarHoy();
   // cada minuto: una fila al servidor (sin foto, sin Gemini)
   if (acc.tot >= 60) {
-    const fila = { tienda: tienda(), zona: z.nombre, ts: Date.now(), seg_presente: acc.si, seg_total: acc.tot, dif_prom: Math.round(acc.difs.reduce((a, b) => a + b, 0) / acc.difs.length) };
-    acc = { si: 0, tot: 0, difs: [], desde: Date.now() };
+    const fila = { tienda: tienda(), zona: z.nombre, ts: Date.now(), seg_presente: acc.si, seg_total: acc.tot, dif_prom: Math.round(acc.difs.reduce((a, b) => a + b, 0) / acc.difs.length), personas_max: acc.nmax || 0 };
+    acc = { si: 0, tot: 0, difs: [], desde: Date.now(), nmax: 0 };
     if (!$('modoPrueba').checked) srv('presencia', fila).catch(e => log('presencia no guardada: ' + e.message, 'e'));
   }
 }
@@ -615,7 +659,7 @@ function iniciar() {
   cargarRef(); acc = { si: 0, tot: 0, difs: [], desde: Date.now() }; ultimoEstado = null;
   cancelar(presTick); presTick = cada(pasoPres() * 1000, tickPresencia);
   log(`Presencia de host: revisión cada ${pasoPres()} s (sin Gemini).`);
-  if (!refHost) log('Falta marcar la estación vacía (botón ③) para medir presencia de host.', 'e');
+  if (!refHost && !modelo) log('Detector de personas cargando; si no carga, marca la estación vacía (botón ③).', 'e');
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
   $('btnStart').disabled = true; $('btnStop').disabled = false;
   ls('vigia_tienda', tienda());
