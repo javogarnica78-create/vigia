@@ -383,6 +383,12 @@ function pintar() {
     octx.fillStyle = color; octx.font = 'bold 12px system-ui'; octx.fillText(label, x + 4, y + 14);
   };
   zonas.forEach(z => { const T = TIPOS[z.tipo] || TIPOS.OTRA; const r = rt[z.nombre]; draw(z.rect, T.color, `${z.nombre} · ${z.tipo}`, !!(r && r.evento)); });
+  // área de entrada (donde una persona nueva dispara la ráfaga) y quién está ahí
+  if (typeof areaEntrada === 'function' && modelo) {
+    const ae = areaEntrada();
+    if (ae) { octx.setLineDash([6, 4]); draw(ae, '#f59e0b', 'entrada'); octx.setLineDash([]); }
+    (ultEntradaCajas || []).forEach(b => draw(b, '#f59e0b', ''));
+  }
   // personas detectadas que cuentan para la host (verde); las de fuera del área no se dibujan
   (typeof ultCajas !== 'undefined' ? ultCajas : []).filter(b => b.dentro).forEach(b => draw(b, '#3ddc84', 'persona'));
   if (drawing && dragStart && dragNow) { const z = zonas[drawing.idx]; const T = TIPOS[z && z.tipo] || TIPOS.OTRA; draw(rectFrom(dragStart, dragNow), T.color, '…'); }
@@ -459,17 +465,18 @@ function fotosTiempo(motivo) {
        .forEach(z => subir(z, z.tipo, motivo, 'P_' + z.nombre + '_' + Date.now(), true));
 }
 
-function iniciarRafaga(z, pct) {
-  const r = rt[z.nombre];
-  const n = Math.round(num('rafN', 4)), seg = num('rafSeg', 20), evento = 'M_' + z.nombre + '_' + Date.now();
-  r.evento = { id: evento, i: 0 };
+function iniciarRafaga(z, pct, causa) {
+  const r = rt[z.nombre] || (rt[z.nombre] = { prev: null, evento: null, cool: 0 });
+  const n = Math.round(num('rafN', 15)), seg = num('rafSeg', 1), evento = 'M_' + z.nombre + '_' + Date.now();
+  causa = causa || `movimiento en puerta ${pct.toFixed(1)}%`;
+  r.evento = { id: evento, i: 0, causa };
   stats.ev++; $('sEv').textContent = stats.ev;
-  log(`${z.nombre}: movimiento ${pct.toFixed(1)}% → ráfaga ${n}×${seg}s`, 'k'); pintar();
+  log(`${z.nombre}: ${causa} → ráfaga ${n}×${seg}s`, 'k'); pintar();
   const tomar = () => {
     if (!running || !r.evento || r.evento.id !== evento) return;
     r.evento.i++;
     const hostAhora = refHost && ultimoEstado !== null ? (ultimoEstado ? 'estación host OCUPADA' : 'estación host VACÍA') : 'estación host sin medir';
-    subir(z, z.tipo, `puerta abierta · foto ${r.evento.i}/${n} · cada ${seg}s · ${hostAhora}`, evento, false);
+    subir(z, z.tipo, `${r.evento.causa} · foto ${r.evento.i}/${n} · cada ${seg}s · ${hostAhora}`, evento, false);
     if (r.evento.i < n) despues(seg * 1000, tomar);
     else { r.evento = null; r.cool = Date.now() + num('coolP', 90) * 1000; r.prev = null; pintar(); }
   };
@@ -593,6 +600,45 @@ async function personasEnZona(rect) {
   return n;
 }
 
+// ── DISPARO POR PERSONA NUEVA EN LA ENTRADA (detector local, cada 1 s)
+// Área de entrada = franja de la puerta extendida hacia abajo (el tapete). Se siguen las cajas entre revisiones:
+// solo dispara una persona que no estaba en la revisión anterior (la host parada ahí no dispara).
+var entradaPrev = null, entradaCand = [], entradaBusy = false, ultEntradaCajas = [], entradaTimer = null;
+function areaEntrada() {
+  const p = zonas.find(z => z.tipo === 'PUERTA' && z.rect);
+  if (!p) return null;
+  const x = Math.max(0, p.rect.x - 0.03), w = Math.min(1 - x, p.rect.w + 0.06);
+  return { x, y: p.rect.y, w, h: Math.min(1 - p.rect.y, 0.30) };
+}
+function iou(a, b) {
+  const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)), iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const i = ix * iy; return i / (a.w * a.h + b.w * b.h - i);
+}
+async function revisarEntrada() {
+  const area = areaEntrada(), puerta = zonas.find(z => z.tipo === 'PUERTA' && z.rect);
+  if (!running || !modelo || !area || !puerta || congelada || entradaBusy || !video.videoWidth) return;
+  const r = rt[puerta.nombre] || (rt[puerta.nombre] = { prev: null, evento: null, cool: 0 });
+  entradaBusy = true;
+  try {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const det = (await modelo.detect(video, 20, 0.45)).filter(d => d.class === 'person');
+    const cajas = det.map(d => ({ x: d.bbox[0] / vw, y: d.bbox[1] / vh, w: d.bbox[2] / vw, h: d.bbox[3] / vh }))
+      .filter(b => { const ix = Math.max(0, Math.min(b.x + b.w, area.x + area.w) - Math.max(b.x, area.x)), iy = Math.max(0, Math.min(b.y + b.h, area.y + area.h) - Math.max(b.y, area.y)); return ix * iy / (b.w * b.h) >= 0.3; });
+    ultEntradaCajas = cajas;
+    if (entradaPrev === null) { entradaPrev = cajas; entradaCand = []; entradaBusy = false; return; } // 1a revisión: solo foto de base
+    // candidatas = personas que no estaban en la revisión anterior; se CONFIRMAN si siguen ahí en la siguiente
+    const confirmadas = cajas.filter(b => entradaCand.some(c => iou(b, c) >= 0.3));
+    entradaCand = cajas.filter(b => entradaPrev.every(p => iou(b, p) < 0.3));
+    entradaPrev = cajas;
+    if (confirmadas.length && !r.evento && Date.now() > r.cool && Date.now() > warmupUntil) {
+      entradaCand = [];
+      log(`Persona nueva en la entrada (${cajas.length} en el área) → ráfaga`, 'k');
+      iniciarRafaga(puerta, 0, 'persona nueva en la entrada');
+    }
+  } catch (e) { /* una falla aislada del detector no detiene nada */ }
+  entradaBusy = false;
+}
+
 async function tickPresencia() {
   const z = zonaHost();
   if (!running || !z || congelada || !video.videoWidth || detBusy) return;
@@ -667,6 +713,8 @@ function iniciar() {
   cancelar(freezeTimer); freezeTimer = cada(5000, revisarCongelada);
   cargarRef(); acc = { si: 0, tot: 0, difs: [], desde: Date.now() }; ultimoEstado = null;
   cancelar(presTick); presTick = cada(pasoPres() * 1000, tickPresencia);
+  entradaPrev = null; entradaCand = [];
+  cancelar(entradaTimer); entradaTimer = cada(1000, revisarEntrada);
   log(`Presencia de host: revisión cada ${pasoPres()} s (sin Gemini).`);
   if (!refHost && !modelo) log('Detector de personas cargando; si no carga, marca la estación vacía (botón ③).', 'e');
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
@@ -685,7 +733,7 @@ function iniciar() {
 function detener(silencioso) {
   running = false;
   Object.values(rt).forEach(r => r.evento = null);
-  cancelar(presTimer); cancelar(motionTimer); cancelar(freezeTimer); cancelar(presTick); presTimer = motionTimer = freezeTimer = presTick = null;
+  cancelar(presTimer); cancelar(motionTimer); cancelar(freezeTimer); cancelar(presTick); cancelar(entradaTimer); presTimer = motionTimer = freezeTimer = presTick = entradaTimer = null;
   $('pillRun').textContent = 'detenido'; $('pillRun').classList.remove('on');
   $('btnStart').disabled = !stream; $('btnStop').disabled = true;
   pintar(); if (!silencioso) log('Detenido.');
