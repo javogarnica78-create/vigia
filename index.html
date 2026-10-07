@@ -96,7 +96,7 @@
     <h2>3 · Parámetros</h2>
     <details><summary>HOST · presencia local + foto de auditoría</summary>
       <div class="grid2">
-        <label>Foto auditoría cada <input type="number" id="presMin" value="30" min="1" max="240"> min</label>
+        <label>Foto auditoría cada <input type="number" id="presMin" value="0" min="0" max="240"> min (0 = apagado)</label>
         <label>Sensibilidad presencia <input type="number" id="umbHost" value="12" min="2" max="80"> %</label>
         <label>Revisar presencia cada <input type="number" id="presSeg" value="15" min="5" max="120"> s</label>
         <label>Foto si hay <input type="number" id="grupoN" value="3" min="1" max="20"> personas o más</label>
@@ -663,10 +663,10 @@ function iniciar() {
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
   $('btnStart').disabled = true; $('btnStop').disabled = false;
   ls('vigia_tienda', tienda());
-  if (listas.some(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo === 'tiempo')) {
-    fotosTiempo('inicio');
-    presTimer = cada(num('presMin', 30) * 60 * 1000, () => fotosTiempo('programada'));
-    log(`HOST: foto cada ${num('presMin', 10)} min.`);
+  // Fotos del host SOLO por evento (3+ personas). La foto por tiempo queda apagada salvo que se ponga un valor > 0.
+  if (num('presMin', 0) > 0 && listas.some(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo === 'tiempo')) {
+    presTimer = cada(num('presMin', 0) * 60 * 1000, () => fotosTiempo('programada'));
+    log(`HOST: foto de auditoría cada ${num('presMin', 0)} min.`);
   }
   if (listas.some(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo !== 'tiempo')) {
     motionTimer = cada(400, medir);
