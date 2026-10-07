@@ -84,6 +84,7 @@
     <div class="mini" id="zonaHint" style="color:#ffb020;font-size:13px"></div>
     <button id="btnRef" class="big" style="border-left:6px solid #3b82f6">③ Marcar estación VACÍA<br><span class="mini">clic cuando NO haya nadie en el área ①: la página revisa cada 15 s si está ocupada, sin Gemini</span></button>
     <div class="row"><span class="pill" id="pillHost">host: sin referencia</span><span class="mini" id="hostHoy"></span></div>
+    <div class="mini" id="conteo" style="color:var(--txt)">Clientes: 0 entraron · 0 salieron | Personal: 0↓ 0↑ | dudas: 0</div>
     <div id="zonas" style="display:flex;flex-direction:column;gap:6px"></div>
     <details><summary>+ Más zonas (cuarto frío, otras)</summary>
       <div class="row" style="margin-top:6px">
@@ -222,6 +223,7 @@ function srv(fn, ...args) {
   else if (fn === 'analizarPendientes') body = { accion: 'analizar', token };
   else if (fn === 'ping') body = { accion: 'ping', token, tienda: tienda() };
   else if (fn === 'presencia') body = Object.assign({ accion: 'presencia' }, args[0]);
+  else if (fn === 'movimiento') body = Object.assign({ accion: 'movimiento' }, args[0]);
   else return Promise.resolve(null);
   // Apps Script responde JSON legible por CORS con text/plain (petición simple): así vemos errores reales
   return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
@@ -456,10 +458,25 @@ function subir(z, modo, motivo, evento, recorte) {
   if (!d) return;
   subirDato(z, modo, motivo, evento, d, Date.now());
 }
+// ── SESIÓN de monitoreo: el dashboard acumula por sesión. Un F5 con regreso en < 15 min sigue la misma sesión.
+var sesionMem = null;
+function sesionActual() {
+  const k = 'vigia_ses_' + tienda(), now = Date.now();
+  let s = sesionMem;
+  if (!s || s.tienda !== tienda()) { try { s = JSON.parse(ls(k) || 'null'); } catch (e) { s = null; } }
+  if (!s || now - s.last > 15 * 60000) {
+    const d = new Date(), pad = n => String(n).padStart(2, '0');
+    s = { id: `${tienda()}_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`, tienda: tienda(), last: now };
+    log('Sesión nueva: ' + s.id, 'k');
+  }
+  s.last = now; sesionMem = s; ls(k, JSON.stringify(s));
+  return s.id;
+}
+
 // sube una foto ya capturada (se usa también para las fotos de memoria previa, con su hora real)
 function subirDato(z, modo, motivo, evento, d, ts) {
   stats.fotos++; $('sFotos').textContent = stats.fotos;
-  const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts };
+  const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts, sesion: sesionActual() };
   log(`📸 ${z.nombre}: ${motivo.split(' · ').slice(0, 2).join(' · ')}`);
   encolarSubida(p, z, motivo);
 }
@@ -654,6 +671,77 @@ function iou(a, b) {
   const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)), iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
   const i = ix * iy; return i / (a.w * a.h + b.w * b.h - i);
 }
+// ── CONTEO LOCAL DE ENTRADAS / SALIDAS + personal vs cliente (sin Gemini)
+// Seguimiento de personas entre revisiones de 1 s. Entrada = aparece junto a la puerta y se aleja hacia adentro.
+// Salida = viene de adentro y se pierde junto a la puerta. Personal = torso mayormente oscuro (uniforme negro).
+var tracks = [], trackSeq = 0, conteo = { entCli: 0, salCli: 0, entPer: 0, salPer: 0, duda: 0 };
+const cuadroColor = document.createElement('canvas'), ccx = cuadroColor.getContext('2d', { willReadFrequently: true });
+function oscuridadTorso(b) {
+  // fracción de pixeles oscuros y poco saturados en el torso (20-55% del alto, 60% central del ancho)
+  const W = cuadroColor.width, H = cuadroColor.height;
+  const x0 = Math.round((b.x + b.w * 0.2) * W), x1 = Math.round((b.x + b.w * 0.8) * W);
+  const y0 = Math.round((b.y + b.h * 0.2) * H), y1 = Math.round((b.y + b.h * 0.55) * H);
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+  const px = ccx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+  let osc = 0, n = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i + 1], bl = px[i + 2], mx = Math.max(r, g, bl), mn = Math.min(r, g, bl);
+    const lum = (r * 299 + g * 587 + bl * 114) / 1000;
+    if (lum < 70 && mx - mn < 40) osc++;
+    n++;
+  }
+  return n ? osc / n : null;
+}
+function centro(b) { return { x: b.x + b.w / 2, y: b.y + b.h }; }   // pies: punto de apoyo en el piso
+// punto del PISO en la puerta: la franja de la puerta está arriba (marco); los pies de alguien parado en la puerta
+// quedan ~25% del alto de la imagen más abajo
+function distPuerta(c, p) { const px = p.rect.x + p.rect.w / 2, py = Math.min(0.95, p.rect.y + p.rect.h + 0.25); return Math.hypot(c.x - px, c.y - py); }
+function actualizarTracks(cajas, puerta) {
+  const now = Date.now();
+  cajas.forEach(b => { b.c = centro(b); b.osc = oscuridadTorso(b); });
+  // asignación voraz por distancia de pies (máx 12% del cuadro entre revisiones de 1 s)
+  const libres = new Set(tracks.map((t, i) => i));
+  cajas.forEach(b => {
+    let mejor = -1, md = 0.12;
+    libres.forEach(i => { const t = tracks[i], d = Math.hypot(b.c.x - t.c.x, b.c.y - t.c.y); if (d < md) { md = d; mejor = i; } });
+    if (mejor >= 0) {
+      const t = tracks[mejor]; libres.delete(mejor);
+      t.c = b.c; t.last = now; t.n++; if (b.osc != null) t.osc.push(b.osc);
+      t.dMin = Math.min(t.dMin, distPuerta(b.c, puerta)); t.dFin = distPuerta(b.c, puerta);
+    } else {
+      const d = distPuerta(b.c, puerta);
+      tracks.push({ id: ++trackSeq, c: b.c, ini: now, last: now, n: 1, osc: b.osc != null ? [b.osc] : [], dIni: d, dMin: d, dFin: d });
+    }
+  });
+  // cerrar tracks que no se ven hace 3 s y clasificar
+  tracks = tracks.filter(t => {
+    if (now - t.last < 3000) return true;
+    cerrarTrack(t);
+    return false;
+  });
+}
+function cerrarTrack(t) {
+  if (t.n < 2) return;                       // un solo cuadro: ruido
+  const cerca = 0.18, mov = 0.08;
+  let tipo = null;
+  if (t.dIni < cerca && t.dFin - t.dIni > mov) tipo = 'ENTRADA';
+  else if (t.dFin < cerca && t.dIni - t.dFin > mov) tipo = 'SALIDA';
+  if (!tipo) return;                         // pasó de largo / se quedó: no es entrada ni salida
+  const o = t.osc.length ? t.osc.reduce((a, b) => a + b, 0) / t.osc.length : null;
+  const quien = o == null ? 'DUDA' : o >= 0.55 ? 'PERSONAL' : o <= 0.35 ? 'CLIENTE' : 'DUDA';
+  if (quien === 'CLIENTE') tipo === 'ENTRADA' ? conteo.entCli++ : conteo.salCli++;
+  else if (quien === 'PERSONAL') tipo === 'ENTRADA' ? conteo.entPer++ : conteo.salPer++;
+  else conteo.duda++;
+  pintarConteo();
+  log(`${tipo === 'ENTRADA' ? '➡️ Entrada' : '⬅️ Salida'}: ${quien.toLowerCase()} (ropa oscura ${o == null ? '?' : Math.round(o * 100) + '%'})`, quien === 'CLIENTE' ? 'k' : '');
+  if (!$('modoPrueba').checked) srv('movimiento', { tienda: tienda(), sesion: sesionActual(), ts: t.last, tipo, quien, oscuro: o == null ? '' : Math.round(o * 100) / 100, seg: Math.round((t.last - t.ini) / 1000) })
+    .catch(e => log('movimiento no guardado: ' + e.message, 'e'));
+}
+function pintarConteo() {
+  const el = $('conteo'); if (!el) return;
+  el.textContent = `Clientes: ${conteo.entCli} entraron · ${conteo.salCli} salieron | Personal: ${conteo.entPer}↓ ${conteo.salPer}↑ | dudas: ${conteo.duda}`;
+}
+
 async function revisarEntrada() {
   const area = areaEntrada(), puerta = zonas.find(z => z.tipo === 'PUERTA' && z.rect);
   if (!running || !modelo || !area || !puerta || congelada || entradaBusy || !video.videoWidth) return;
@@ -662,6 +750,11 @@ async function revisarEntrada() {
   try {
     const vw = video.videoWidth, vh = video.videoHeight;
     const det = (await modelo.detect(video, 20, 0.45)).filter(d => d.class === 'person');
+    // cuadro de color reducido para medir la ropa, y seguimiento de todas las personas para entradas/salidas
+    cuadroColor.width = 480; cuadroColor.height = Math.round(480 * vh / vw);
+    ccx.drawImage(video, 0, 0, cuadroColor.width, cuadroColor.height);
+    const todas = det.map(d => ({ x: d.bbox[0] / vw, y: d.bbox[1] / vh, w: d.bbox[2] / vw, h: d.bbox[3] / vh }));
+    actualizarTracks(todas, puerta);
     const cajas = det.map(d => ({ x: d.bbox[0] / vw, y: d.bbox[1] / vh, w: d.bbox[2] / vw, h: d.bbox[3] / vh }))
       .filter(b => { const ix = Math.max(0, Math.min(b.x + b.w, area.x + area.w) - Math.max(b.x, area.x)), iy = Math.max(0, Math.min(b.y + b.h, area.y + area.h) - Math.max(b.y, area.y)); return ix * iy / (b.w * b.h) >= 0.3; });
     ultEntradaCajas = cajas;
@@ -738,7 +831,7 @@ async function tickPresencia() {
   pintarHoy();
   // cada minuto: una fila al servidor (sin foto, sin Gemini)
   if (acc.tot >= 60) {
-    const fila = { tienda: tienda(), zona: z.nombre, ts: Date.now(), seg_presente: acc.si, seg_total: acc.tot, dif_prom: Math.round(acc.difs.reduce((a, b) => a + b, 0) / acc.difs.length), personas_max: acc.nmax || 0, seg_junta: acc.segJunta || 0 };
+    const fila = { tienda: tienda(), zona: z.nombre, ts: Date.now(), seg_presente: acc.si, seg_total: acc.tot, dif_prom: Math.round(acc.difs.reduce((a, b) => a + b, 0) / acc.difs.length), personas_max: acc.nmax || 0, seg_junta: acc.segJunta || 0, sesion: sesionActual() };
     acc = { si: 0, tot: 0, difs: [], desde: Date.now(), nmax: 0, segJunta: 0 };
     if (!$('modoPrueba').checked) srv('presencia', fila).catch(e => log('presencia no guardada: ' + e.message, 'e'));
   }
@@ -781,6 +874,7 @@ function iniciar() {
   entradaPrev = null; entradaCand = [];
   cancelar(entradaTimer); entradaTimer = cada(1000, revisarEntrada);
   previo = []; cancelar(previoTimer); previoTimer = cada(1000, guardarPrevio);
+  sesionActual();
   log(`Presencia de host: revisión cada ${pasoPres()} s (sin Gemini).`);
   if (!refHost && !modelo) log('Detector de personas cargando; si no carga, marca la estación vacía (botón ③).', 'e');
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');

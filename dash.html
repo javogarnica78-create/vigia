@@ -89,8 +89,10 @@
     </div>
     <div class="filters">
       <select id="tienda" aria-label="Tienda"></select>
+      <select id="sesion" aria-label="Sesión"></select>
       <div class="seg" role="group" aria-label="Periodo">
-        <button data-p="hoy" class="on">Hoy</button>
+        <button data-p="sesion" class="on">Sesión</button>
+        <button data-p="hoy">Hoy</button>
         <button data-p="semana">Esta semana</button>
         <button data-p="mes">Este mes</button>
       </div>
@@ -125,6 +127,21 @@
       <div class="lbl">Por analizar</div>
       <div class="val" id="kPend">–</div>
       <div class="note">fotos de puerta esperando análisis de Gemini</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Clientes que entraron</div>
+      <div class="val" id="kCliEnt">–</div>
+      <div class="note" id="kCliEntNote">conteo local, sin personal</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Clientes que salieron</div>
+      <div class="val" id="kCliSal">–</div>
+      <div class="note" id="kCliSalNote">conteo local</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Personal entrando / saliendo</div>
+      <div class="val" id="kPerMov">–</div>
+      <div class="note" id="kPerMovNote">ropa oscura (uniforme)</div>
     </div>
     <div class="card tile">
       <div class="lbl">Llegadas</div>
@@ -207,7 +224,7 @@
 const EXEC = 'https://script.google.com/macros/s/AKfycbzPwqEs74peNw4GmutZFjVkgIskELiaQIZCrautUMPSE0cPl1-6FQs3BxJEjKTS_w8g/exec';
 const $ = id => document.getElementById(id);
 const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
-let DATA = null, periodo = ls('dash_periodo') || 'hoy';
+let DATA = null, periodo = ls('dash_periodo') || 'sesion';
 
 // ───────── datos ─────────
 async function cargar() {
@@ -236,7 +253,7 @@ const segDe = h => { const p = String(h || '0:0:0').split(':').map(Number); retu
 const iso = d => d.toISOString().slice(0, 10);
 function rango(hoy) {
   const d = new Date(hoy + 'T12:00:00Z');
-  if (periodo === 'hoy') return [hoy, hoy];
+  if (periodo === 'hoy' || periodo === 'sesion') return [hoy, hoy];
   if (periodo === 'semana') { const dow = d.getUTCDay() || 7; const ini = new Date(d); ini.setUTCDate(d.getUTCDate() - dow + 1); return [iso(ini), hoy]; }
   return [hoy.slice(0, 8) + '01', hoy];
 }
@@ -246,7 +263,7 @@ function muestrasHost(filas) {
   filas.forEach(r => {
     if (r[4] !== 'HOST' || r[5] !== 'ANALIZADO') return;
     const k = r[2] + '|' + r[0] + '|' + r[3];
-    (grupos[k] = grupos[k] || []).push({ fecha: r[0], hora: r[1], tienda: r[2], s: segDe(r[1]), presente: r[6] === 'STAFF' || (r[9] || 0) > 0, foto: r[11] });
+    (grupos[k] = grupos[k] || []).push({ fecha: r[0], hora: r[1], tienda: r[2], s: segDe(r[1]), presente: r[6] === 'STAFF' || (r[9] || 0) > 0, foto: r[11], ses: r[14] || '' });
   });
   // 1) medición local por minuto (la buena): manda sobre las fotos donde exista para esa tienda y día
   const out = [], conLocal = new Set();
@@ -255,7 +272,7 @@ function muestrasHost(filas) {
     if (!p[5]) return;
     conLocal.add(p[2] + '|' + p[0]);
     const si = p[4] / 60, no = (p[5] - p[4]) / 60;
-    out.push({ fecha: p[0], hora: p[1], tienda: p[2], s: segDe(p[1]) - p[5], min: p[5] / 60, si, no, presente: si >= no, local: true, foto: '' });
+    out.push({ fecha: p[0], hora: p[1], tienda: p[2], s: segDe(p[1]) - p[5], min: p[5] / 60, si, no, presente: si >= no, local: true, foto: '', ses: p[8] || '' });
   });
   // 2) fotos analizadas por Gemini (respaldo, solo días sin medición local)
   Object.values(grupos).forEach(g => {
@@ -272,7 +289,7 @@ function eventosPuerta(filas) {
   const ev = {};
   filas.forEach(r => {
     if (!['PUERTA', 'MOVIMIENTO', 'OTRA'].includes(r[4]) || r[5] !== 'ANALIZADO') return;
-    if (!ev[r[10]] || r[1] < ev[r[10]].hora) ev[r[10]] = { fecha: r[0], hora: r[1], tienda: r[2], tipo: r[6], res: r[7], seg: r[8], personas: r[9] || 0, foto: r[11], resumen: r[12], mano: r[13] || '' };
+    if (!ev[r[10]] || r[1] < ev[r[10]].hora) ev[r[10]] = { fecha: r[0], hora: r[1], tienda: r[2], tipo: r[6], res: r[7], seg: r[8], personas: r[9] || 0, foto: r[11], resumen: r[12], mano: r[13] || '', ses: r[14] || '' };
   });
   return Object.values(ev);
 }
@@ -286,9 +303,11 @@ function render() {
   const filas = DATA.filas.filter(r => !tSel || r[2] === tSel);
   const hoy = DATA.ahora.slice(0, 10);
   const [ini, fin] = rango(hoy);
-  const enP = f => f >= ini && f <= fin;
+  const selSes = $('sesion').value;
+  // en periodo "Sesión" se filtra por la sesión elegida; si no, por fechas
+  const enP = x => periodo === 'sesion' ? (selSes && x.ses === selSes) : (x.fecha >= ini && x.fecha <= fin);
   const M = muestrasHost(filas), E = eventosPuerta(filas);
-  const Mp = M.filter(m => enP(m.fecha)), Ep = E.filter(e => enP(e.fecha));
+  const Mp = M.filter(enP), Ep = E.filter(enP);
 
   // KPIs host
   const si = Mp.reduce((a, m) => a + m.si, 0);
@@ -323,7 +342,15 @@ function render() {
   $('kSal').textContent = sal.reduce((a, e) => a + e.personas, 0);
   $('kSalNote').textContent = `personas en ${sal.length} grupos`;
   $('kEmp').textContent = Ep.filter(e => e.tipo === 'EMPLEADO').reduce((a, e) => a + (e.personas || 1), 0);
-  const presP = (DATA.presencia || []).filter(p => enP(p[0]) && (!tSel || p[2] === tSel));
+  // conteo local de entradas/salidas: m = [fecha, hora, tienda, tipo, quien, oscuro, seg, sesion]
+  const movP = (DATA.movimientos || []).filter(m => enP({ fecha: m[0], ses: m[7] || '' }) && (!tSel || m[2] === tSel));
+  const cuenta = (tipo, quien) => movP.filter(m => m[3] === tipo && m[4] === quien).length;
+  const dudas = movP.filter(m => m[4] === 'DUDA').length;
+  $('kCliEnt').textContent = movP.length ? cuenta('ENTRADA', 'CLIENTE') : '–';
+  $('kCliEntNote').textContent = movP.length ? `sin contar personal${dudas ? ` · ${dudas} por confirmar` : ''}` : 'conteo local, sin personal';
+  $('kCliSal').textContent = movP.length ? cuenta('SALIDA', 'CLIENTE') : '–';
+  $('kPerMov').textContent = movP.length ? `${cuenta('ENTRADA', 'PERSONAL')} / ${cuenta('SALIDA', 'PERSONAL')}` : '–';
+  const presP = (DATA.presencia || []).filter(p => enP({ fecha: p[0], ses: p[8] || '' }) && (!tSel || p[2] === tSel));
   const segJ = presP.reduce((a, p) => a + (p[7] || 0), 0), segT = presP.reduce((a, p) => a + (p[5] || 0), 0);
   $('kJunta').textContent = presP.length ? fmtMin(segJ / 60) : '–';
   $('kJuntaNote').textContent = presP.length ? `${segT ? pct(segJ / segT) : '–'} del tiempo monitoreado · máx ${Math.max(0, ...presP.map(p => p[6] || 0))} personas a la vez` : 'tiempo con 2+ personas en la estación';
@@ -436,13 +463,32 @@ document.querySelectorAll('.seg button').forEach(b => {
   b.classList.toggle('on', b.dataset.p === periodo);
   b.onclick = () => { periodo = b.dataset.p; ls('dash_periodo', periodo); document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b)); render(); };
 });
-$('tienda').onchange = () => { ls('dash_tienda', $('tienda').value); render(); };
+$('tienda').onchange = () => { ls('dash_tienda', $('tienda').value); llenarSesiones(true); render(); };
+let sesionElegida = '';   // vacío = seguir siempre la sesión más reciente
+$('sesion').onchange = () => { sesionElegida = $('sesion').selectedIndex === 0 ? '' : $('sesion').value; periodo = 'sesion'; ls('dash_periodo', periodo); document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x.dataset.p === 'sesion')); render(); };
+function llenarSesiones(reset) {
+  if (reset) sesionElegida = '';
+  const tSel = $('tienda').value, ses = {};
+  const add = (id, tienda, fecha, hora) => {
+    if (!id || (tSel && tienda !== tSel)) return;
+    const k = fecha + 'T' + hora, s = ses[id] || (ses[id] = { id, tienda, ini: k, fin: k });
+    if (k < s.ini) s.ini = k; if (k > s.fin) s.fin = k;
+  };
+  (DATA.presencia || []).forEach(p => add(p[8], p[2], p[0], p[1]));
+  (DATA.movimientos || []).forEach(m => add(m[7], m[2], m[0], m[1]));
+  DATA.filas.forEach(r => add(r[14], r[2], r[0], r[1]));
+  const L = Object.values(ses).sort((a, b) => b.ini.localeCompare(a.ini));
+  const min = s => Math.max(1, Math.round((segDe(s.fin.slice(11)) - segDe(s.ini.slice(11))) / 60));
+  $('sesion').innerHTML = L.length ? L.map((s, i) => `<option value="${s.id}">${i === 0 ? '● ' : ''}${s.tienda} · ${s.ini.slice(5, 10)} ${s.ini.slice(11, 16)}–${s.fin.slice(11, 16)} (${min(s)} min)</option>`).join('') : '<option value="">sin sesiones</option>';
+  if (sesionElegida && L.some(s => s.id === sesionElegida)) $('sesion').value = sesionElegida;
+}
 async function ciclo() {
   $('avisos').innerHTML = ''; delete $('avisos').dataset.g;
   if (await cargar()) {
     const sel = ls('dash_tienda') || '';
     const ts = [...new Set(DATA.filas.map(r => r[2]))].sort();
     $('tienda').innerHTML = '<option value="">Todas las tiendas</option>' + ts.map(t => `<option ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
+    llenarSesiones();
     render();
   }
 }
