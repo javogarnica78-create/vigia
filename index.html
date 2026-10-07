@@ -367,9 +367,28 @@ function recorteUnion() {
   const x1 = Math.min(1, Math.max(...rs.map(r => r.x + r.w)) + m), y1 = Math.min(1, Math.max(...rs.map(r => r.y + r.h)) + m);
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
+// cuadro completo con los recuadros de las zonas dibujados encima (referencia espacial para el análisis)
+function capturarConZonas(maxW) {
+  const d = capturar(null, maxW);
+  if (!d) return null;
+  const sx = work.width, sy = work.height;
+  wctx.lineWidth = Math.max(2, Math.round(sx / 400));
+  wctx.font = `bold ${Math.max(12, Math.round(sx / 60))}px system-ui`;
+  zonas.filter(z => z.rect).forEach(z => {
+    const T = TIPOS[z.tipo] || TIPOS.OTRA;
+    const x = z.rect.x * sx, y = z.rect.y * sy, w = z.rect.w * sx, h = z.rect.h * sy;
+    wctx.strokeStyle = T.color; wctx.strokeRect(x, y, w, h);
+    const lbl = z.tipo === 'HOST' ? 'ESTACIÓN HOST' : z.tipo === 'PUERTA' ? 'PUERTA' : z.nombre.toUpperCase();
+    const tw = wctx.measureText(lbl).width + 8;
+    wctx.fillStyle = T.color; wctx.fillRect(x, Math.max(0, y - 18), tw, 18);
+    wctx.fillStyle = '#000'; wctx.fillText(lbl, x + 4, Math.max(13, y - 4));
+  });
+  return work.toDataURL('image/jpeg', 0.78);
+}
 function subir(z, modo, motivo, evento, recorte) {
   const T = TIPOS[z.tipo] || TIPOS.OTRA;
-  const d = recorte ? capturar(z.rect, 1024) : capturar(z.tipo === 'FRIO' ? z.rect : recorteUnion(), 1024);
+  if (congelada) { log(`${z.nombre}: foto NO enviada (captura congelada)`, 'e'); return; }
+  const d = recorte ? capturar(z.rect, 1024) : (z.tipo === 'FRIO' ? capturar(z.rect, 1024) : capturarConZonas(1280));
   if (!d) return;
   stats.fotos++; $('sFotos').textContent = stats.fotos;
   const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts: Date.now() };
@@ -450,12 +469,38 @@ function medir() {
 }
 let warmupUntil = 0;
 
+// ── detector de captura congelada: la cámara trae reloj en pantalla, así que un cuadro idéntico por 60 s = congelada
+let congelada = false, prevFull = null, igualesDesde = Date.now(), freezeTimer = null;
+const tiny = document.createElement('canvas'), tctx = tiny.getContext('2d', { willReadFrequently: true });
+tiny.width = 64; tiny.height = 36;
+function revisarCongelada() {
+  if (!stream || !video.videoWidth) return;
+  tctx.drawImage(video, 0, 0, tiny.width, tiny.height);
+  const px = tctx.getImageData(0, 0, tiny.width, tiny.height).data;
+  let dif = 0;
+  if (prevFull) for (let i = 0; i < px.length; i += 4) dif += Math.abs(px[i] - prevFull[i]) + Math.abs(px[i + 1] - prevFull[i + 1]);
+  prevFull = px;
+  const now = Date.now();
+  if (dif > 0) igualesDesde = now;
+  const estaba = congelada;
+  congelada = now - igualesDesde > 60000;
+  if (congelada && !estaba) {
+    setErr('⚠️ CAPTURA CONGELADA: la imagen no cambia hace 1 minuto. No minimices iVMS. Si sigue así, da clic en "Elegir pantalla o pestaña" y vuelve a escoger la ventana (arranca solo).');
+    log('Captura congelada: se pausan las fotos hasta que vuelva a moverse.', 'e');
+    document.title = '⚠️ Vigia CONGELADA';
+  } else if (!congelada && estaba) {
+    setErr(''); log('La captura volvió a moverse: fotos reanudadas.', 'k'); document.title = 'Vigia';
+  }
+}
+
 function iniciar() {
   if (!stream) { setErr('Primero elige pantalla o pestaña.'); return; }
   const listas = zonas.filter(z => z.rect);
   if (!listas.length) { setErr('Dibuja al menos una zona.'); return; }
   setErr('');
   running = true; rt = {}; warmupUntil = Date.now() + 3000;
+  congelada = false; prevFull = null; igualesDesde = Date.now();
+  clearInterval(freezeTimer); freezeTimer = setInterval(revisarCongelada, 5000);
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
   $('btnStart').disabled = true; $('btnStop').disabled = false;
   ls('vigia_tienda', tienda());
@@ -472,7 +517,7 @@ function iniciar() {
 function detener(silencioso) {
   running = false;
   Object.values(rt).forEach(r => r.evento = null);
-  clearInterval(presTimer); clearInterval(motionTimer); presTimer = motionTimer = null;
+  clearInterval(presTimer); clearInterval(motionTimer); clearInterval(freezeTimer); presTimer = motionTimer = freezeTimer = null;
   $('pillRun').textContent = 'detenido'; $('pillRun').classList.remove('on');
   $('btnStart').disabled = !stream; $('btnStop').disabled = true;
   pintar(); if (!silencioso) log('Detenido.');
