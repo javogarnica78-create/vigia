@@ -383,8 +383,8 @@ function pintar() {
     octx.fillStyle = color; octx.font = 'bold 12px system-ui'; octx.fillText(label, x + 4, y + 14);
   };
   zonas.forEach(z => { const T = TIPOS[z.tipo] || TIPOS.OTRA; const r = rt[z.nombre]; draw(z.rect, T.color, `${z.nombre} · ${z.tipo}`, !!(r && r.evento)); });
-  // personas detectadas: verde = cuenta para la host, gris = fuera del área
-  (typeof ultCajas !== 'undefined' ? ultCajas : []).forEach(b => draw(b, b.dentro ? '#3ddc84' : '#9aa3b2', b.dentro ? 'persona' : ''));
+  // personas detectadas que cuentan para la host (verde); las de fuera del área no se dibujan
+  (typeof ultCajas !== 'undefined' ? ultCajas : []).filter(b => b.dentro).forEach(b => draw(b, '#3ddc84', 'persona'));
   if (drawing && dragStart && dragNow) { const z = zonas[drawing.idx]; const T = TIPOS[z && z.tipo] || TIPOS.OTRA; draw(rectFrom(dragStart, dragNow), T.color, '…'); }
 }
 
