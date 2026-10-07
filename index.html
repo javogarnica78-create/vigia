@@ -100,7 +100,7 @@
         <label>Sensibilidad presencia <input type="number" id="umbHost" value="12" min="2" max="80"> %</label>
         <label>Revisar presencia cada <input type="number" id="presSeg" value="15" min="5" max="120"> s</label>
         <label>Foto si hay <input type="number" id="grupoN" value="3" min="1" max="20"> personas o más</label>
-        <label>Alarma "gente de más": <input type="number" id="juntaN" value="2" min="2" max="20"> o más personas por <input type="number" id="juntaMin" value="2" min="1" max="60"> min</label>
+        <label>Alarma "gente de más": <input type="number" id="juntaN" value="2" min="2" max="20"> o más personas por <input type="number" id="juntaMin" value="2" min="1" max="60"> min, foto cada <input type="number" id="juntaRep" value="3" min="1" max="60"> min mientras dure</label>
       </div>
       <div class="mini">Presente = más de ese % del área ① distinto a la foto de estación vacía.</div>
     </details>
@@ -490,7 +490,8 @@ function iniciarRafaga(z, pct, causa) {
     if (!running || !r.evento || r.evento.id !== evento) return;
     r.evento.i++;
     const hostAhora = refHost && ultimoEstado !== null ? (ultimoEstado ? 'estación host OCUPADA' : 'estación host VACÍA') : 'estación host sin medir';
-    subir(z, z.tipo, `${r.evento.causa} · foto ${r.evento.i}/${n} · cada ${seg}s · ${hostAhora}`, evento, false);
+    const extra = r.evento.extra && r.evento.extra.length ? ' · también: ' + [...new Set(r.evento.extra)].join(' / ') : '';
+    subir(z, z.tipo, `${r.evento.causa} · foto ${r.evento.i}/${n} · cada ${seg}s · ${hostAhora}${extra}`, evento, false);
     if (r.evento.i < n) despues(seg * 1000, tomar);
     else { r.evento = null; r.cool = Date.now() + num('coolP', 90) * 1000; r.prev = null; pintar(); }
   };
@@ -653,6 +654,19 @@ async function revisarEntrada() {
   entradaBusy = false;
 }
 
+// Condiciones cruzadas: si hay una ráfaga de puerta en curso, NO se toma foto aparte (sería el mismo momento);
+// la condición se agrega como etiqueta a las fotos que le quedan a la ráfaga. Si no hay ráfaga, foto normal.
+function fotoHostOEtiqueta(zHost, motivo, evento) {
+  const activa = Object.values(rt).find(r => r && r.evento);
+  if (activa) {
+    activa.evento.extra = (activa.evento.extra || []).concat(motivo);
+    log(`${motivo} → se agrega a la ráfaga en curso (sin foto duplicada)`, 'k');
+    return;
+  }
+  log(`${motivo} → foto`, 'e');
+  subir(zHost, 'HOST', motivo, evento, false);
+}
+
 async function tickPresencia() {
   const z = zonaHost();
   if (!running || !z || congelada || !video.videoWidth || detBusy) return;
@@ -673,8 +687,7 @@ async function tickPresencia() {
   // N o más personas en la host (default 3) → una foto de todo el contexto (pausa de 2 min para no repetir)
   if (n !== null && n >= num('grupoN', 3) && Date.now() - ultGrupo > 120000) {
     ultGrupo = Date.now();
-    log(`${n} personas en la host → foto`, 'k');
-    subir(z, 'HOST', `${n} personas en host (${num('grupoN', 3)} o más)`, 'G_' + Date.now(), false);
+    fotoHostOEtiqueta(z, `${n} personas en host (${num('grupoN', 3)} o más)`, 'G_' + Date.now());
   }
   // "gente de más" en la host: N+ personas sostenido por M min → foto, y otra cada 5 min mientras dure
   if (n !== null) {
@@ -683,10 +696,9 @@ async function tickPresencia() {
       acc.segJunta = (acc.segJunta || 0) + paso;
       if (!juntaDesde) juntaDesde = now;
       const min = (now - juntaDesde) / 60000;
-      if (min >= num('juntaMin', 2) && now - ultJuntaFoto > 5 * 60000) {
+      if (min >= num('juntaMin', 2) && now - ultJuntaFoto > num('juntaRep', 3) * 60000) {
         ultJuntaFoto = now;
-        log(`Gente de más en la host: ${n} personas desde hace ${Math.round(min)} min → foto`, 'e');
-        subir(z, 'HOST', `gente de más: ${n} personas en host desde hace ${Math.round(min)} min`, 'J_' + juntaDesde, false);
+        fotoHostOEtiqueta(z, `gente de más: ${n} personas en host desde hace ${Math.round(min)} min`, 'J_' + juntaDesde);
       }
     } else { juntaDesde = 0; }
   }
