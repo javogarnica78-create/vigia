@@ -328,7 +328,7 @@ function renderStrip(m) {
 function barras(el, items, opts) {
   // items: [{label, v, tip, strong}] — una sola serie, barras con punta redondeada anclada a la base
   if (!items.length || items.every(x => !x.v)) { el.innerHTML = `<div class="empty">${opts.vacio || 'Sin datos'}</div>`; return; }
-  const W = 560, H = 190, pl = 34, pb = 22, pt = 8, w = W - pl - 4, h = H - pb - pt;
+  const W = opts.W || 560, H = 190, pl = 34, pb = 22, pt = 8, w = W - pl - 4, h = H - pb - pt;
   const max = opts.max || Math.max(1, ...items.map(x => x.v));
   const bw = w / items.length, gap = Math.min(6, bw * 0.25), r = Math.min(4, (bw - gap) / 2);
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opts.aria}">`;
@@ -366,7 +366,7 @@ function renderDias(M, ini, fin, hoy) {
     const f = iso(new Date(new Date(hoy + 'T12:00:00Z').getTime() - i * 86400000)), d = ds[f];
     items.push({ label: f.slice(8) + '/' + f.slice(5, 7), v: d && d.t ? d.si / d.t : 0, strong: f >= ini && f <= fin, tip: `${f} · ${d && d.t ? pct(d.si / d.t) + ' cubierta · ' + fmtMin(d.t) + ' monitoreado' : 'sin monitorear'}` });
   }
-  barras($('chDia'), items, { max: 1, fmt: v => Math.round(v * 100) + '%', aria: '% cubierta por día', vacio: 'Sin días con fotos analizadas' });
+  barras($('chDia'), items, { W: 1140, max: 1, fmt: v => Math.round(v * 100) + '%', aria: '% cubierta por día', vacio: 'Sin días con fotos analizadas' });
 }
 
 function renderTabla(M, E) {

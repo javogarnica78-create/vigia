@@ -256,6 +256,9 @@ async function elegirPantalla() {
     $('btnStart').disabled = false;
     sizeOverlay(); pintar();
     log('Cámara lista.', 'k');
+    // arranque automático: si ya hay áreas guardadas, empieza solo
+    if (zonas.some(z => z.rect)) { log('Áreas guardadas encontradas → iniciando solo.', 'k'); iniciar(); }
+    else $('zonaHint').textContent = 'Dibuja ① y ②: en cuanto dibujes, empieza solo.';
   } catch (e) {
     let m = `${e.name}: ${e.message}`;
     if (e.name === 'NotAllowedError' || e.name === 'NotSupportedError') {
@@ -324,9 +327,12 @@ ov.addEventListener('pointerup', e => {
   const r = ov.getBoundingClientRect();
   const rect = rectFrom(dragStart, toNorm(e.clientX - r.left, e.clientY - r.top));
   const z = zonas[drawing.idx];
-  if (z && rect.w > 0.01 && rect.h > 0.01) { z.rect = rect; log(`Zona ${z.nombre} (${z.tipo}) definida.`, 'k'); guardarZonas(); }
+  const nueva = z && rect.w > 0.01 && rect.h > 0.01;
+  if (nueva) { z.rect = rect; log(`Zona ${z.nombre} (${z.tipo}) definida.`, 'k'); guardarZonas(); }
   drawing = null; dragStart = dragNow = null; ov.style.cursor = 'default';
   renderZonas(); pintar();
+  // arranque / reinicio automático con las áreas nuevas
+  if (nueva && stream) { if (running) detener(true); iniciar(); }
 });
 function pintar() {
   octx.clearRect(0, 0, ov.width, ov.height);
@@ -454,13 +460,13 @@ function iniciar() {
     log(`Movimiento: umbral ${num('umbral', 3)}%, muestreo 400 ms, ${listas.filter(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo !== 'tiempo').length} zona(s).`);
   }
 }
-function detener() {
+function detener(silencioso) {
   running = false;
   Object.values(rt).forEach(r => r.evento = null);
   clearInterval(presTimer); clearInterval(motionTimer); presTimer = motionTimer = null;
   $('pillRun').textContent = 'detenido'; $('pillRun').classList.remove('on');
   $('btnStart').disabled = !stream; $('btnStop').disabled = true;
-  pintar(); log('Detenido.');
+  pintar(); if (!silencioso) log('Detenido.');
 }
 
 async function analizar() {
@@ -478,7 +484,7 @@ async function analizar() {
 Object.keys(TIPOS).forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = TIPOS[k].label; $('zTipo').appendChild(o); });
 $('btnCam').onclick = elegirPantalla;
 $('btnStart').onclick = iniciar;
-$('btnStop').onclick = detener;
+$('btnStop').onclick = () => detener();
 $('btnAnalizar').onclick = analizar;
 $('tienda').addEventListener('change', () => { ls('vigia_tienda', tienda()); cargarConfig(); });
 $('execUrl').addEventListener('change', () => ls('vigia_exec', $('execUrl').value.trim()));
