@@ -150,6 +150,26 @@ const TIPOS = {
   OTRA:   { label: 'OTRA · movimiento',       color: '#a78bfa', disparo: 'rafaga',    recorte: false }
 };
 
+// ───────────────────────────────────────────── reloj que Chrome no frena ──
+// En pestañas de fondo Chrome frena setTimeout/setInterval hasta 1 vez por minuto (rompía ráfagas y la detección de
+// puerta). Un Worker sí sigue mandando "ticks" cada 200 ms; todas las tareas periódicas se agendan sobre ese reloj.
+const tareas = new Map(); let tareaSeq = 0;
+function cada(ms, fn) { const id = ++tareaSeq; tareas.set(id, { at: Date.now() + ms, every: ms, fn }); return id; }
+function despues(ms, fn) { const id = ++tareaSeq; tareas.set(id, { at: Date.now() + ms, every: 0, fn }); return id; }
+function cancelar(id) { if (id) tareas.delete(id); }
+function correrTareas() {
+  const now = Date.now();
+  for (const [id, t] of [...tareas]) {
+    if (now < t.at) continue;
+    if (t.every) t.at = now + t.every; else tareas.delete(id);
+    try { t.fn(); } catch (e) { console.error(e); }
+  }
+}
+try {
+  const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 200)'], { type: 'text/javascript' })));
+  ticker.onmessage = correrTareas;
+} catch (e) { setInterval(correrTareas, 200); }
+
 // ───────────────────────────────────────────── estado ──
 const EN_GAS = (typeof google !== 'undefined' && google.script && google.script.run);
 const $ = id => document.getElementById(id);
@@ -439,7 +459,7 @@ function iniciarRafaga(z, pct) {
     r.evento.i++;
     const hostAhora = refHost && ultimoEstado !== null ? (ultimoEstado ? 'estación host OCUPADA' : 'estación host VACÍA') : 'estación host sin medir';
     subir(z, z.tipo, `puerta abierta · foto ${r.evento.i}/${n} · cada ${seg}s · ${hostAhora}`, evento, false);
-    if (r.evento.i < n) setTimeout(tomar, seg * 1000);
+    if (r.evento.i < n) despues(seg * 1000, tomar);
     else { r.evento = null; r.cool = Date.now() + num('coolP', 90) * 1000; r.prev = null; pintar(); }
   };
   tomar();
@@ -466,7 +486,7 @@ function iniciarActividad(z, pct) {
       return;
     }
     subir(z, z.tipo, `actividad · foto ${r.evento.i} · t+${Math.round(transcurrido)}s`, evento, false);
-    setTimeout(paso, seg * 1000);
+    despues(seg * 1000, paso);
   };
   paso();
 }
@@ -591,9 +611,9 @@ function iniciar() {
   setErr('');
   running = true; rt = {}; warmupUntil = Date.now() + 3000;
   congelada = false; prevFull = null; igualesDesde = Date.now();
-  clearInterval(freezeTimer); freezeTimer = setInterval(revisarCongelada, 5000);
+  cancelar(freezeTimer); freezeTimer = cada(5000, revisarCongelada);
   cargarRef(); acc = { si: 0, tot: 0, difs: [], desde: Date.now() }; ultimoEstado = null;
-  clearInterval(presTick); presTick = setInterval(tickPresencia, pasoPres() * 1000);
+  cancelar(presTick); presTick = cada(pasoPres() * 1000, tickPresencia);
   log(`Presencia de host: revisión cada ${pasoPres()} s (sin Gemini).`);
   if (!refHost) log('Falta marcar la estación vacía (botón ③) para medir presencia de host.', 'e');
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
@@ -601,18 +621,18 @@ function iniciar() {
   ls('vigia_tienda', tienda());
   if (listas.some(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo === 'tiempo')) {
     fotosTiempo('inicio');
-    presTimer = setInterval(() => fotosTiempo('programada'), num('presMin', 10) * 60 * 1000);
+    presTimer = cada(num('presMin', 30) * 60 * 1000, () => fotosTiempo('programada'));
     log(`HOST: foto cada ${num('presMin', 10)} min.`);
   }
   if (listas.some(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo !== 'tiempo')) {
-    motionTimer = setInterval(medir, 400);
+    motionTimer = cada(400, medir);
     log(`Movimiento: umbral ${num('umbral', 3)}%, muestreo 400 ms, ${listas.filter(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo !== 'tiempo').length} zona(s).`);
   }
 }
 function detener(silencioso) {
   running = false;
   Object.values(rt).forEach(r => r.evento = null);
-  clearInterval(presTimer); clearInterval(motionTimer); clearInterval(freezeTimer); clearInterval(presTick); presTimer = motionTimer = freezeTimer = presTick = null;
+  cancelar(presTimer); cancelar(motionTimer); cancelar(freezeTimer); cancelar(presTick); presTimer = motionTimer = freezeTimer = presTick = null;
   $('pillRun').textContent = 'detenido'; $('pillRun').classList.remove('on');
   $('btnStart').disabled = !stream; $('btnStop').disabled = true;
   pintar(); if (!silencioso) log('Detenido.');
