@@ -293,7 +293,7 @@ function render() {
   $('kPct').textContent = tot ? pct(si / tot) : '–';
   $('kSi').textContent = tot ? fmtMin(si) : '–';
   $('kNo').textContent = tot ? fmtMin(no) : '–';
-  $('kMon').textContent = tot ? `Monitoreado: ${fmtMin(tot)} · ${nLocal ? 'medido cada 5 s' : Mp.length + ' fotos (método anterior)'}` : 'Sin medición en este periodo';
+  $('kMon').textContent = tot ? `Monitoreado: ${fmtMin(tot)} · ${nLocal ? 'medición local continua' : Mp.length + ' fotos (método anterior)'}` : 'Sin medición en este periodo';
   $('kBar').innerHTML = tot ? `<i style="width:${si / tot * 100}%;background:var(--good)"></i><i style="width:${no / tot * 100}%;background:var(--bad)"></i>` : '';
 
   // en vivo

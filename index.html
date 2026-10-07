@@ -82,7 +82,7 @@
     <button id="btnQHost" class="big" style="border-left:6px solid #3b82f6">① Área HOSTESS<br><span class="mini">dónde debe estar la host · foto cada X min</span></button>
     <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">cuando se abre la puerta: 6 fotos de todo el contexto, una cada 6 s</span></button>
     <div class="mini" id="zonaHint" style="color:#ffb020;font-size:13px"></div>
-    <button id="btnRef" class="big" style="border-left:6px solid #3b82f6">③ Marcar estación VACÍA<br><span class="mini">clic cuando NO haya nadie en el área ①: la página mide presencia sola, sin Gemini</span></button>
+    <button id="btnRef" class="big" style="border-left:6px solid #3b82f6">③ Marcar estación VACÍA<br><span class="mini">clic cuando NO haya nadie en el área ①: la página revisa cada 15 s si está ocupada, sin Gemini</span></button>
     <div class="row"><span class="pill" id="pillHost">host: sin referencia</span><span class="mini" id="hostHoy"></span></div>
     <div id="zonas" style="display:flex;flex-direction:column;gap:6px"></div>
     <details><summary>+ Más zonas (cuarto frío, otras)</summary>
@@ -98,6 +98,7 @@
       <div class="grid2">
         <label>Foto auditoría cada <input type="number" id="presMin" value="30" min="1" max="240"> min</label>
         <label>Sensibilidad presencia <input type="number" id="umbHost" value="12" min="2" max="80"> %</label>
+        <label>Revisar presencia cada <input type="number" id="presSeg" value="15" min="5" max="120"> s</label>
       </div>
       <div class="mini">Presente = más de ese % del área ① distinto a la foto de estación vacía.</div>
     </details>
@@ -500,6 +501,7 @@ let refHost = null, presTick = null, acc = { si: 0, tot: 0, difs: [], desde: Dat
 const pz = document.createElement('canvas'), pzx = pz.getContext('2d', { willReadFrequently: true });
 pz.width = 64; pz.height = 64;
 function zonaHost() { return zonas.find(z => z.tipo === 'HOST' && z.rect); }
+function pasoPres() { return Math.min(120, Math.max(5, Math.round(num('presSeg', 15)))); }
 function grisZona(rect) {
   const vw = video.videoWidth, vh = video.videoHeight;
   pzx.drawImage(video, rect.x * vw, rect.y * vh, Math.max(1, rect.w * vw), Math.max(1, rect.h * vh), 0, 0, 64, 64);
@@ -523,7 +525,7 @@ function marcarVacia() {
   if (!z) { setErr('Primero dibuja el área ① HOSTESS.'); return; }
   refHost = grisZona(z.rect); refTienda = tienda();
   ls('vigia_ref_' + tienda(), btoa(String.fromCharCode(...refHost)));
-  setErr(''); log('Referencia de estación vacía guardada. Desde ahora se mide presencia cada 5 s.', 'k');
+  setErr(''); log(`Referencia de estación vacía guardada. Desde ahora se mide presencia cada ${pasoPres()} s.`, 'k');
   $('pillHost').textContent = 'host: referencia lista';
 }
 function hoyKey() { return 'vigia_hoy_' + tienda() + '_' + new Date().toLocaleDateString('en-CA'); }
@@ -538,8 +540,8 @@ function tickPresencia() {
   if (!running || !refHost || !z || congelada || !video.videoWidth) return;
   const g = grisZona(z.rect);
   let ch = 0; for (let i = 0; i < g.length; i++) if (Math.abs(g[i] - refHost[i]) > 30) ch++;
-  const pct = ch * 100 / g.length, presente = pct >= num('umbHost', 12);
-  acc.tot += 5; if (presente) acc.si += 5; acc.difs.push(Math.round(pct));
+  const pct = ch * 100 / g.length, presente = pct >= num('umbHost', 12), paso = pasoPres();
+  acc.tot += paso; if (presente) acc.si += paso; acc.difs.push(Math.round(pct));
   const pill = $('pillHost');
   pill.textContent = `host: ${presente ? 'OCUPADO' : 'VACÍO'} (${pct.toFixed(0)}%)`;
   pill.style.color = presente ? 'var(--ok)' : 'var(--bad)'; pill.style.borderColor = pill.style.color;
@@ -547,7 +549,7 @@ function tickPresencia() {
   ultimoEstado = presente;
   // acumulado del día (local, para verlo aunque no haya conexión)
   let h = {}; try { h = JSON.parse(ls(hoyKey()) || '{}'); } catch (e) {}
-  h.tot = (h.tot || 0) + 5; if (presente) h.si = (h.si || 0) + 5; ls(hoyKey(), JSON.stringify(h));
+  h.tot = (h.tot || 0) + paso; if (presente) h.si = (h.si || 0) + paso; ls(hoyKey(), JSON.stringify(h));
   pintarHoy();
   // cada minuto: una fila al servidor (sin foto, sin Gemini)
   if (acc.tot >= 60) {
@@ -590,7 +592,8 @@ function iniciar() {
   congelada = false; prevFull = null; igualesDesde = Date.now();
   clearInterval(freezeTimer); freezeTimer = setInterval(revisarCongelada, 5000);
   cargarRef(); acc = { si: 0, tot: 0, difs: [], desde: Date.now() }; ultimoEstado = null;
-  clearInterval(presTick); presTick = setInterval(tickPresencia, 5000);
+  clearInterval(presTick); presTick = setInterval(tickPresencia, pasoPres() * 1000);
+  log(`Presencia de host: revisión cada ${pasoPres()} s (sin Gemini).`);
   if (!refHost) log('Falta marcar la estación vacía (botón ③) para medir presencia de host.', 'e');
   $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
   $('btnStart').disabled = true; $('btnStop').disabled = false;
