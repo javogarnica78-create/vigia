@@ -100,6 +100,7 @@
         <label>Sensibilidad presencia <input type="number" id="umbHost" value="12" min="2" max="80"> %</label>
         <label>Revisar presencia cada <input type="number" id="presSeg" value="15" min="5" max="120"> s</label>
         <label>Foto si hay <input type="number" id="grupoN" value="3" min="1" max="20"> personas o más</label>
+        <label>Alarma "gente de más": <input type="number" id="juntaN" value="2" min="2" max="20"> o más personas por <input type="number" id="juntaMin" value="2" min="1" max="60"> min</label>
       </div>
       <div class="mini">Presente = más de ese % del área ① distinto a la foto de estación vacía.</div>
     </details>
@@ -454,9 +455,22 @@ function subir(z, modo, motivo, evento, recorte) {
   if (!d) return;
   stats.fotos++; $('sFotos').textContent = stats.fotos;
   const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts: Date.now() };
-  cola = cola.then(() => srv('guardarFoto', p))
-    .then(r => { if (r && r.url) log(`${z.nombre}: <a href="${r.url}" target="_blank">foto</a> fila ${r.fila} · ${motivo}`); else log(`${z.nombre}: enviada · ${motivo}`); })
-    .catch(e => log('Error al guardar: ' + e.message, 'e'));
+  log(`📸 ${z.nombre}: ${motivo.split(' · ').slice(0, 2).join(' · ')}`);
+  encolarSubida(p, z, motivo);
+}
+
+// subidas en paralelo (3 a la vez): Apps Script tarda ~4 s por foto y en fila se acumulaba la cola
+const subidasPend = []; let subiendo = 0;
+function encolarSubida(p, z, motivo) { subidasPend.push({ p, z, motivo }); bombearSubidas(); }
+function bombearSubidas() {
+  while (subiendo < 3 && subidasPend.length) {
+    const { p, z, motivo } = subidasPend.shift();
+    subiendo++;
+    srv('guardarFoto', p)
+      .then(r => { if (r && r.url) log(`✓ subida ${z.nombre}: <a href="${r.url}" target="_blank">foto</a> · ${motivo.split(' · ').slice(0, 2).join(' · ')}`); })
+      .catch(e => { log('Error al guardar: ' + e.message, 'e'); if (!p._reint) { p._reint = 1; subidasPend.push({ p, z, motivo }); } })
+      .finally(() => { subiendo--; bombearSubidas(); });
+  }
 }
 
 // ───────────────────────────────────────────── disparos ──
@@ -579,7 +593,7 @@ function pintarHoy() {
   $('hostHoy').textContent = tot ? `Hoy: ${Math.round(si / tot * 100)}% con host · ${f(si)} con host · ${f(tot - si)} vacía` : '';
 }
 // ── detector de personas (COCO-SSD) — si no carga, se usa la comparación contra la estación vacía
-var modelo = null, detBusy = false, ultCajas = [], ultGrupo = 0;   // var: pintar() las lee y puede correr antes
+var modelo = null, detBusy = false, ultCajas = [], ultGrupo = 0, juntaDesde = 0, ultJuntaFoto = 0;   // var: pintar() las lee y puede correr antes
 try {
   if (window.cocoSsd) cocoSsd.load({ base: 'lite_mobilenet_v2' }).then(m => { modelo = m; log('Detector de personas listo (local, sin Gemini).', 'k'); }).catch(e => log('Detector de personas no cargó: se usa comparación de imagen. ' + e.message, 'e'));
 } catch (e) {}
@@ -662,8 +676,22 @@ async function tickPresencia() {
     log(`${n} personas en la host → foto`, 'k');
     subir(z, 'HOST', `${n} personas en host (${num('grupoN', 3)} o más)`, 'G_' + Date.now(), false);
   }
+  // "gente de más" en la host: N+ personas sostenido por M min → foto, y otra cada 5 min mientras dure
+  if (n !== null) {
+    const juntaN = num('juntaN', 2), now = Date.now();
+    if (n >= juntaN) {
+      acc.segJunta = (acc.segJunta || 0) + paso;
+      if (!juntaDesde) juntaDesde = now;
+      const min = (now - juntaDesde) / 60000;
+      if (min >= num('juntaMin', 2) && now - ultJuntaFoto > 5 * 60000) {
+        ultJuntaFoto = now;
+        log(`Gente de más en la host: ${n} personas desde hace ${Math.round(min)} min → foto`, 'e');
+        subir(z, 'HOST', `gente de más: ${n} personas en host desde hace ${Math.round(min)} min`, 'J_' + juntaDesde, false);
+      }
+    } else { juntaDesde = 0; }
+  }
   const pill = $('pillHost');
-  pill.textContent = n !== null ? `host: ${n === 0 ? 'VACÍO' : n + (n === 1 ? ' persona' : ' personas')}` : `host: ${presente ? 'OCUPADO' : 'VACÍO'} (${pct.toFixed(0)}%)`;
+  pill.textContent = n !== null ?`host: ${n === 0 ? 'VACÍO' : n + (n === 1 ? ' persona' : ' personas')}` : `host: ${presente ? 'OCUPADO' : 'VACÍO'} (${pct.toFixed(0)}%)`;
   pill.style.color = presente ? 'var(--ok)' : 'var(--bad)'; pill.style.borderColor = pill.style.color;
   if (ultimoEstado !== null && ultimoEstado !== presente) log(`Estación host: ${presente ? 'OCUPADA' : 'VACÍA'}`, presente ? 'k' : 'e');
   ultimoEstado = presente;
@@ -673,8 +701,8 @@ async function tickPresencia() {
   pintarHoy();
   // cada minuto: una fila al servidor (sin foto, sin Gemini)
   if (acc.tot >= 60) {
-    const fila = { tienda: tienda(), zona: z.nombre, ts: Date.now(), seg_presente: acc.si, seg_total: acc.tot, dif_prom: Math.round(acc.difs.reduce((a, b) => a + b, 0) / acc.difs.length), personas_max: acc.nmax || 0 };
-    acc = { si: 0, tot: 0, difs: [], desde: Date.now(), nmax: 0 };
+    const fila = { tienda: tienda(), zona: z.nombre, ts: Date.now(), seg_presente: acc.si, seg_total: acc.tot, dif_prom: Math.round(acc.difs.reduce((a, b) => a + b, 0) / acc.difs.length), personas_max: acc.nmax || 0, seg_junta: acc.segJunta || 0 };
+    acc = { si: 0, tot: 0, difs: [], desde: Date.now(), nmax: 0, segJunta: 0 };
     if (!$('modoPrueba').checked) srv('presencia', fila).catch(e => log('presencia no guardada: ' + e.message, 'e'));
   }
 }

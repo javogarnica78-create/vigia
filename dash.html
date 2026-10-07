@@ -152,6 +152,11 @@
       <div class="note" id="kManoNote">al recibir y despedir</div>
     </div>
     <div class="card tile">
+      <div class="lbl">Gente de más en la host</div>
+      <div class="val" id="kJunta">–</div>
+      <div class="note" id="kJuntaNote">tiempo con 2+ personas en la estación</div>
+    </div>
+    <div class="card tile">
       <div class="lbl">Empleados entrando / saliendo</div>
       <div class="val" id="kEmp">–</div>
       <div class="note">descontados de las llegadas</div>
@@ -318,6 +323,10 @@ function render() {
   $('kSal').textContent = sal.reduce((a, e) => a + e.personas, 0);
   $('kSalNote').textContent = `personas en ${sal.length} grupos`;
   $('kEmp').textContent = Ep.filter(e => e.tipo === 'EMPLEADO').reduce((a, e) => a + (e.personas || 1), 0);
+  const presP = (DATA.presencia || []).filter(p => enP(p[0]) && (!tSel || p[2] === tSel));
+  const segJ = presP.reduce((a, p) => a + (p[7] || 0), 0), segT = presP.reduce((a, p) => a + (p[5] || 0), 0);
+  $('kJunta').textContent = presP.length ? fmtMin(segJ / 60) : '–';
+  $('kJuntaNote').textContent = presP.length ? `${segT ? pct(segJ / segT) : '–'} del tiempo monitoreado · máx ${Math.max(0, ...presP.map(p => p[6] || 0))} personas a la vez` : 'tiempo con 2+ personas en la estación';
   const conGesto = [...lleg, ...sal].filter(e => e.mano === 'SI' || e.mano === 'NO');
   const siG = conGesto.filter(e => e.mano === 'SI').length, noG = conGesto.length - siG;
   const noVis = [...lleg, ...sal].filter(e => e.mano === 'NO_VISIBLE').length;
