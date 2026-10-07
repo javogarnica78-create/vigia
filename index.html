@@ -118,7 +118,7 @@
         <label>Pausa después <input type="number" id="coolF" value="20" min="0" max="900"> s</label>
       </div>
     </details>
-    <div class="row"><label>Umbral movimiento <input type="number" id="umbral" value="8" min="0.5" max="60" step="0.5"> % píxeles</label></div>
+    <div class="row"><label>Umbral movimiento <input type="number" id="umbral" value="4" min="0.5" max="60" step="0.5"> % píxeles</label></div>
 
     <h2>4 · Correr</h2>
     <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--txt)"><input type="checkbox" id="modoPrueba"> <b>Modo prueba</b>: no sube fotos ni gasta Gemini, solo muestra abajo qué dispararía</label>
@@ -218,7 +218,7 @@ function srv(fn, ...args) {
   if (fn === 'guardarFoto') body = Object.assign({}, args[0], { token });
   else if (fn === 'guardarAreas') body = { accion: 'areas', tienda: args[0], areas: args[1], token };
   else if (fn === 'analizarPendientes') body = { accion: 'analizar', token };
-  else if (fn === 'ping') body = { accion: 'ping', token };
+  else if (fn === 'ping') body = { accion: 'ping', token, tienda: tienda() };
   else if (fn === 'presencia') body = Object.assign({ accion: 'presencia' }, args[0]);
   else return Promise.resolve(null);
   // Apps Script responde JSON legible por CORS con text/plain (petición simple): así vemos errores reales
@@ -236,8 +236,8 @@ async function validarToken() {
   // ya no se necesita token para guardar fotos; solo confirmamos que el servidor responde
   try {
     const d = await srv('ping');
-    log(`Conectado ✓ · ${d.filas} fotos en bitácora${d.tieneGemini ? ' · análisis Gemini activo' : ' · falta GEMINI_API_KEY: se guardan pero no se analizan'}`, d.tieneGemini ? 'k' : 'e');
-    return true;
+    log(`Conectado ✓ · ${d.filas} fotos en bitácora`, 'k');
+    return d;
   } catch (e) {
     setErr('No hay conexión con el servidor: ' + e.message);
     log('Sin conexión: ' + e.message, 'e');
@@ -265,7 +265,12 @@ async function cargarConfig() {
     const L = window.VIGIA_LOCAL || {};
     $('execUrl').value = ls('vigia_exec') || L.exec || EXEC_SRV;
     $('token').value = ls('vigia_token') || L.token || '';
-    await validarToken();
+    const d = await validarToken();
+    // las áreas guardadas en el servidor mandan (así se pueden ajustar desde allá sin redibujar aquí)
+    if (d && d.areas && d.areas.zonas && d.areas.zonas.length) {
+      zonas = d.areas.zonas; ls('vigia_zonas_' + t, JSON.stringify(zonas));
+      log('Áreas cargadas del servidor.', 'k');
+    }
   }
   renderZonas(); pintar();
 }
@@ -514,9 +519,13 @@ function medir() {
     const m = $('zm' + idx); if (m) m.style.width = Math.min(100, pct * 4) + '%';
     const st = $('zst' + idx); if (st && !r.evento) st.textContent = `${T.label} · mov ${pct.toFixed(1)}%${now < r.cool ? ' · pausa' : ''}`;
     if (r.evento && T.disparo === 'actividad' && pct >= umbral) r.evento.ultimoMov = now;
-    // movimiento SOSTENIDO: 3 muestras seguidas (~1.2 s) sobre el umbral; un parpadeo o alguien pasando de lado no dispara
+    // movimiento SOSTENIDO: 2 muestras seguidas (~0.8 s) sobre el umbral; un parpadeo de compresión no dispara
     r.seguidas = pct >= umbral ? (r.seguidas || 0) + 1 : 0;
-    if (!r.evento && r.seguidas >= 3 && now > r.cool && now > warmupUntil) {
+    // diagnóstico: máximo de movimiento de los últimos 10 s, visible en la lista de zonas
+    r.picos = (r.picos || []).filter(p => now - p.t < 10000); r.picos.push({ t: now, v: pct });
+    const pico = Math.max(...r.picos.map(p => p.v));
+    if (st && !r.evento) st.textContent = `${T.label} · mov ${pct.toFixed(1)}% · máx 10s ${pico.toFixed(1)}% · dispara con ${umbral}%`;
+    if (!r.evento && r.seguidas >= 2 && now > r.cool && now > warmupUntil) {
       if (T.disparo === 'actividad') iniciarActividad(z, pct); else iniciarRafaga(z, pct);
     }
   });
