@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigia</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --txt:#e8e8e8; --mut:#9aa3b2;
+          --ok:#3ddc84; --warn:#ffb020; --bad:#ff5c5c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 8px 0 0; letter-spacing:.5px; }
+  label { color:var(--mut); font-size:12px; }
+  input[type=text], input[type=number], select { background:#0b0d12; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
+  input[type=number] { width:64px; }
+  main { display:grid; grid-template-columns: 1fr 340px; gap:12px; padding:12px 14px; }
+  @media (max-width:900px){ main { grid-template-columns:1fr; } }
+  .stage { position:relative; background:#000; border:1px solid var(--line); border-radius:8px; overflow:hidden; min-height:240px; }
+  video { display:block; width:100%; height:auto; }
+  canvas.ov { position:absolute; left:0; top:0; width:100%; height:100%; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .panel h2 { font-size:12px; text-transform:uppercase; color:var(--mut); margin:4px 0 0; letter-spacing:.6px; }
+  button { background:#262b36; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:8px 10px; cursor:pointer; text-align:left; font:inherit; }
+  button:hover { background:#2f3542; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.primary { background:#1f6feb; border-color:#1f6feb; }
+  button.danger { background:#5a1f1f; border-color:#7a2a2a; }
+  button.sm { padding:4px 8px; font-size:12px; }
+  button.big { padding:10px 12px; font-size:14px; font-weight:600; line-height:1.3; }
+  button.active { outline:2px solid #fff6; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--mut); }
+  .pill.on { color:var(--ok); border-color:var(--ok); }
+  .err { color:var(--bad); white-space:pre-wrap; font-size:12px; margin-top:6px; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .stat { background:#0b0d12; border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  .stat b { display:block; font-size:18px; }
+  .stat span { color:var(--mut); font-size:11px; }
+  #log { background:#0b0d12; border:1px solid var(--line); border-radius:6px; padding:8px; height:190px; overflow:auto; font:12px/1.5 ui-monospace,Consolas,monospace; color:#c9d1d9; margin-top:8px; }
+  #log .t { color:#6b7280; }
+  #log .e { color:var(--bad); }
+  #log .k { color:var(--ok); }
+  a { color:#7cb3ff; }
+  .mini { font-size:11px; color:var(--mut); }
+  .zona { display:grid; grid-template-columns: 6px 1fr auto; gap:8px; align-items:center; background:#0b0d12; border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  .zona .bar { width:6px; height:100%; min-height:28px; border-radius:3px; }
+  .zona .nm { font-weight:600; }
+  .zona .st { font-size:11px; color:var(--mut); }
+  .zona .meter { height:4px; background:#1a1e27; border-radius:2px; overflow:hidden; margin-top:4px; }
+  .zona .meter i { display:block; height:100%; width:0; background:var(--warn); transition:width .2s; }
+  details { border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  summary { cursor:pointer; color:var(--mut); font-size:12px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; margin-top:6px; }
+</style>
+</head>
+<body data-exec="<?= execUrl ?>">
+<header>
+  <h1>👁 VIGIA</h1>
+  <label>Tienda <input type="text" id="tienda" placeholder="Doniphan" size="12"></label>
+  <span class="pill" id="pillCam">sin cámara</span>
+  <span class="pill" id="pillRun">detenido</span>
+  <span class="mini" id="links"></span>
+</header>
+
+<main>
+  <div>
+    <div class="stage">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="ov" class="ov"></canvas>
+    </div>
+    <div class="err" id="err"></div>
+    <div id="log"></div>
+  </div>
+
+  <aside class="panel">
+    <h2>1 · Cámara</h2>
+    <button id="btnCam" class="primary">Elegir pantalla o pestaña</button>
+
+    <h2>2 · Dibujar áreas</h2>
+    <button id="btnQHost" class="big" style="border-left:6px solid #3b82f6">① Área HOSTESS<br><span class="mini">dónde debe estar la host · foto cada X min</span></button>
+    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">al cruzar alguien toma ráfaga de fotos</span></button>
+    <div class="mini" id="zonaHint" style="color:#ffb020;font-size:13px"></div>
+    <div id="zonas" style="display:flex;flex-direction:column;gap:6px"></div>
+    <details><summary>+ Más zonas (cuarto frío, otras)</summary>
+      <div class="row" style="margin-top:6px">
+        <input type="text" id="zNombre" placeholder="nombre (frio1, bodega)" size="14">
+        <select id="zTipo"></select>
+        <button id="btnAddZona" class="sm">+ Dibujar</button>
+      </div>
+    </details>
+
+    <h2>3 · Parámetros</h2>
+    <details><summary>HOST · foto por tiempo</summary>
+      <div class="grid2"><label>Cada <input type="number" id="presMin" value="2" min="1" max="120"> min</label></div>
+    </details>
+    <details><summary>PUERTA / OTRA · ráfaga fija</summary>
+      <div class="grid2">
+        <label>Fotos <input type="number" id="rafN" value="4" min="1" max="8"></label>
+        <label>Cada <input type="number" id="rafSeg" value="20" min="3" max="120"> s</label>
+        <label>Pausa después <input type="number" id="coolP" value="90" min="0" max="900"> s</label>
+      </div>
+    </details>
+    <details><summary>FRIO · seguimiento hasta quietud</summary>
+      <div class="grid2">
+        <label>Foto cada <input type="number" id="frSeg" value="10" min="3" max="60"> s</label>
+        <label>Cierra tras <input type="number" id="frQuieto" value="30" min="5" max="300"> s quieto</label>
+        <label>Máximo <input type="number" id="frMax" value="300" min="30" max="1800"> s</label>
+        <label>Pausa después <input type="number" id="coolF" value="20" min="0" max="900"> s</label>
+      </div>
+    </details>
+    <div class="row"><label>Umbral movimiento <input type="number" id="umbral" value="3" min="0.5" max="50" step="0.5"> % píxeles</label></div>
+
+    <h2>4 · Correr</h2>
+    <button id="btnStart" class="primary" disabled>Iniciar fotos</button>
+    <button id="btnStop" class="danger" disabled>Detener</button>
+    <button id="btnAnalizar">Analizar pendientes ahora</button>
+
+    <div class="stats">
+      <div class="stat"><b id="sFotos">0</b><span>fotos</span></div>
+      <div class="stat"><b id="sEv">0</b><span>eventos</span></div>
+      <div class="stat"><b id="sPend">?</b><span>pendientes</span></div>
+    </div>
+
+    <details><summary>Fuera del iframe</summary>
+      <div class="mini">Si Apps Script bloquea la captura, abre este HTML como archivo local y pon la URL /exec y el VIGIA_TOKEN (registro de setup). El deployment debe tener acceso "Cualquier usuario".</div>
+      <input type="text" id="execUrl" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%;margin-top:6px">
+      <input type="text" id="token" placeholder="VIGIA_TOKEN" style="width:100%;margin-top:6px">
+    </details>
+  </aside>
+</main>
+
+<script>
+// ───────────────────────────────────────────── tipos de zona ──
+// disparo: 'tiempo' = foto programada · 'rafaga' = movimiento → N fotos fijas · 'actividad' = movimiento → sigue hasta quietud
+const TIPOS = {
+  HOST:   { label: 'HOST · presencia',        color: '#3b82f6', disparo: 'tiempo',    recorte: true  },
+  PUERTA: { label: 'PUERTA · llegadas',       color: '#f59e0b', disparo: 'rafaga',    recorte: false },
+  FRIO:   { label: 'CUARTO FRÍO / bodega',    color: '#22d3ee', disparo: 'actividad', recorte: false },
+  OTRA:   { label: 'OTRA · movimiento',       color: '#a78bfa', disparo: 'rafaga',    recorte: false }
+};
+
+// ───────────────────────────────────────────── estado ──
+const EN_GAS = (typeof google !== 'undefined' && google.script && google.script.run);
+const $ = id => document.getElementById(id);
+// URL /exec del deployment productivo (no es secreto). Se usa como default en modo archivo local.
+const EXEC_DEFAULT = 'https://script.google.com/macros/s/AKfycbzPwqEs74peNw4GmutZFjVkgIskELiaQIZCrautUMPSE0cPl1-6FQs3BxJEjKTS_w8g/exec';
+let EXEC_SRV = document.body.dataset.exec || '';
+if (EXEC_SRV.indexOf('<' + '?') === 0) EXEC_SRV = EXEC_DEFAULT;   // archivo local: el scriptlet no se evaluó (no escribir el literal junto: rompe el template)
+const video = $('video'), ov = $('ov'), octx = ov.getContext('2d');
+
+let stream = null;
+let zonas = [];                 // [{nombre, tipo, rect:{x,y,w,h} normalizado}]
+let drawing = null;             // {nombre, tipo} mientras se dibuja
+let dragStart = null, dragNow = null;
+let running = false, presTimer = null, motionTimer = null;
+let rt = {};                    // runtime por zona: {prev, evento, cool, warm, pct, ...}
+let stats = { fotos: 0, ev: 0 };
+let cola = Promise.resolve();
+
+const work = document.createElement('canvas'), wctx = work.getContext('2d');
+const small = document.createElement('canvas'), sctx = small.getContext('2d', { willReadFrequently: true });
+small.width = 48; small.height = 48;
+
+// ───────────────────────────────────────────── util ──
+function log(msg, cls) {
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="t">${new Date().toLocaleTimeString('es-MX', { hour12: false })}</span> ${msg}`;
+  if (cls) d.className = cls;
+  $('log').prepend(d);
+  while ($('log').children.length > 300) $('log').lastChild.remove();
+}
+function setErr(m) { $('err').textContent = m || ''; }
+function tienda() { return ($('tienda').value || '').trim() || 'SinTienda'; }
+function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+function num(id, def) { const v = parseFloat($(id).value); return isNaN(v) ? def : v; }
+function limpiarNombre(s) { return String(s || '').trim().replace(/[\\\/:*?"<>|]/g, '-').slice(0, 24); }
+
+// ───────────────────────────────────────────── servidor ──
+function srv(fn, ...args) {
+  if (EN_GAS) return new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args));
+  const url = ($('execUrl').value || '').trim(), token = ($('token').value || '').trim();
+  if (!url || !token) return Promise.reject(new Error('fuera del iframe: falta URL /exec o token'));
+  let body;
+  if (fn === 'guardarFoto') body = Object.assign({}, args[0], { token });
+  else if (fn === 'guardarAreas') body = { accion: 'areas', tienda: args[0], areas: args[1], token };
+  else if (fn === 'analizarPendientes') body = { accion: 'analizar', token };
+  else return Promise.resolve(null);
+  return fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) }).then(() => ({ opaco: true }));
+}
+
+async function cargarConfig() {
+  const t = tienda();
+  const local = ls('vigia_zonas_' + t);
+  if (local) { try { zonas = JSON.parse(local) || []; } catch (e) { zonas = []; } }
+  if (EN_GAS) {
+    try {
+      const cfg = await srv('getConfig');
+      if (!cfg.listo) setErr('Backend sin inicializar: corre setup() en el editor de Apps Script.');
+      if (!cfg.tieneKey) log('Sin GEMINI_API_KEY en propiedades: las fotos se guardan pero no se analizan.', 'e');
+      else log('Análisis con ' + cfg.proveedor + '.');
+      $('sPend').textContent = cfg.pendientes >= 0 ? cfg.pendientes : '?';
+      $('links').innerHTML = (cfg.sheetUrl ? `<a href="${cfg.sheetUrl}" target="_blank">Bitácora</a>` : '') + (cfg.folderUrl ? ` · <a href="${cfg.folderUrl}" target="_blank">Fotos</a>` : '');
+      const a = cfg.areas && cfg.areas[t];
+      if (a && a.zonas && a.zonas.length) zonas = a.zonas;
+    } catch (e) { log('getConfig: ' + e.message, 'e'); }
+    if (EXEC_SRV && !$('execUrl').value) $('execUrl').value = EXEC_SRV;
+  } else {
+    const L = window.VIGIA_LOCAL || {};
+    $('execUrl').value = ls('vigia_exec') || L.exec || EXEC_SRV;
+    $('token').value = ls('vigia_token') || L.token || '';
+    if (!$('token').value) {
+      const t = (prompt('Vigia: pega el VIGIA_TOKEN.\nSolo se pide una vez; queda guardado en este navegador.') || '').trim();
+      if (t) { $('token').value = t; ls('vigia_token', t); }
+    }
+    if ($('token').value) log('Conectado al backend (token cargado).', 'k');
+    else log('Falta token: llena "Fuera del iframe".', 'e');
+  }
+  renderZonas(); pintar();
+}
+
+async function guardarZonas() {
+  const t = tienda();
+  ls('vigia_zonas_' + t, JSON.stringify(zonas));
+  try { const r = await srv('guardarAreas', t, { zonas }); log('Zonas guardadas para ' + t + (r && r.opaco ? ' (este navegador + servidor)' : ''), 'k'); }
+  catch (e) { log('No se guardaron zonas en servidor: ' + e.message, 'e'); }
+}
+
+// ───────────────────────────────────────────── cámara ──
+async function elegirPantalla() {
+  setErr('');
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) throw new DOMException('getDisplayMedia no disponible en este contexto', 'NotSupportedError');
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    stream.getVideoTracks()[0].addEventListener('ended', () => { log('La captura terminó (compartir detenido).', 'e'); detener(); stream = null; $('pillCam').textContent = 'sin cámara'; $('pillCam').classList.remove('on'); $('btnStart').disabled = true; });
+    $('pillCam').textContent = `${video.videoWidth}×${video.videoHeight}`; $('pillCam').classList.add('on');
+    $('btnStart').disabled = false;
+    sizeOverlay(); pintar();
+    log('Cámara lista.', 'k');
+  } catch (e) {
+    let m = `${e.name}: ${e.message}`;
+    if (e.name === 'NotAllowedError' || e.name === 'NotSupportedError') {
+      m += '\n\nSi NO salió el cuadro de Chrome para elegir pantalla, Apps Script bloquea la captura dentro de su iframe. El backend (Drive, Sheet, análisis) ya funciona. Para capturar: guarda este Index.html como archivo local, ábrelo en Chrome, llena "Fuera del iframe" (URL /exec + VIGIA_TOKEN) y cambia el deployment a acceso "Cualquier usuario".';
+    }
+    setErr(m); log(e.name + ' al pedir pantalla', 'e');
+  }
+}
+function sizeOverlay() { const r = video.getBoundingClientRect(); ov.width = Math.max(1, Math.round(r.width)); ov.height = Math.max(1, Math.round(r.height)); }
+window.addEventListener('resize', () => { sizeOverlay(); pintar(); });
+video.addEventListener('loadedmetadata', () => { sizeOverlay(); pintar(); });
+
+// ───────────────────────────────────────────── zonas: UI ──
+function renderZonas() {
+  const box = $('zonas'); box.innerHTML = '';
+  zonas.forEach((z, i) => {
+    const T = TIPOS[z.tipo] || TIPOS.OTRA;
+    const d = document.createElement('div'); d.className = 'zona';
+    const st = z.rect ? `${T.label} · ${Math.round(z.rect.w * 100)}%×${Math.round(z.rect.h * 100)}%` : `${T.label} · sin dibujar`;
+    d.innerHTML = `<div class="bar" style="background:${T.color}"></div>
+      <div><div class="nm">${z.nombre}</div><div class="st" id="zst${i}">${st}</div>${T.disparo !== 'tiempo' ? `<div class="meter"><i id="zm${i}"></i></div>` : ''}</div>
+      <div class="row"><button class="sm" data-i="${i}" data-a="redraw">✎</button><button class="sm" data-i="${i}" data-a="del">✕</button></div>`;
+    box.appendChild(d);
+  });
+  box.querySelectorAll('button').forEach(b => b.onclick = () => {
+    const i = +b.dataset.i;
+    if (b.dataset.a === 'del') { zonas.splice(i, 1); guardarZonas(); renderZonas(); pintar(); }
+    else { drawing = { idx: i }; $('zonaHint').textContent = `Dibuja el rectángulo de "${zonas[i].nombre}" sobre el video.`; ov.style.cursor = 'crosshair'; }
+  });
+  $('zonaHint').textContent = zonas.some(z => z.rect) ? '' : 'Da clic en ① o ② y luego arrastra sobre el video.';
+}
+function zonaRapida(nombre, tipo, texto) {
+  if (!stream) { setErr('Primero da clic en "Elegir pantalla o pestaña" y escoge la ventana de la cámara.'); return; }
+  setErr('');
+  let i = zonas.findIndex(z => z.nombre === nombre);
+  if (i < 0) { zonas.push({ nombre, tipo, rect: null }); i = zonas.length - 1; }
+  drawing = { idx: i };
+  renderZonas();
+  $('zonaHint').textContent = `👉 Ahora arrastra con el mouse sobre el video para marcar ${texto}.`;
+  ov.style.cursor = 'crosshair';
+  pintar();
+}
+$('btnQHost').onclick = () => zonaRapida('host', 'HOST', 'dónde se para la HOSTESS');
+$('btnQPuerta').onclick = () => zonaRapida('puerta', 'PUERTA', 'el UMBRAL de la puerta');
+
+$('btnAddZona').onclick = () => {
+  const nombre = limpiarNombre($('zNombre').value) || ($('zTipo').value.toLowerCase() + (zonas.length + 1));
+  if (zonas.some(z => z.nombre === nombre)) { setErr('Ya existe una zona con ese nombre.'); return; }
+  if (!stream) { setErr('Primero elige pantalla o pestaña para poder dibujar.'); return; }
+  setErr('');
+  zonas.push({ nombre, tipo: $('zTipo').value, rect: null });
+  drawing = { idx: zonas.length - 1 };
+  $('zNombre').value = '';
+  renderZonas();
+  $('zonaHint').textContent = `Dibuja el rectángulo de "${nombre}" sobre el video.`;
+  ov.style.cursor = 'crosshair';
+};
+
+// ───────────────────────────────────────────── zonas: dibujo ──
+function toNorm(px, py) { return { x: Math.min(1, Math.max(0, px / ov.width)), y: Math.min(1, Math.max(0, py / ov.height)) }; }
+function rectFrom(a, b) { return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) }; }
+ov.addEventListener('pointerdown', e => { if (!drawing) return; ov.setPointerCapture(e.pointerId); const r = ov.getBoundingClientRect(); dragStart = toNorm(e.clientX - r.left, e.clientY - r.top); dragNow = dragStart; });
+ov.addEventListener('pointermove', e => { if (!drawing || !dragStart) return; const r = ov.getBoundingClientRect(); dragNow = toNorm(e.clientX - r.left, e.clientY - r.top); pintar(); });
+ov.addEventListener('pointerup', e => {
+  if (!drawing || !dragStart) return;
+  const r = ov.getBoundingClientRect();
+  const rect = rectFrom(dragStart, toNorm(e.clientX - r.left, e.clientY - r.top));
+  const z = zonas[drawing.idx];
+  if (z && rect.w > 0.01 && rect.h > 0.01) { z.rect = rect; log(`Zona ${z.nombre} (${z.tipo}) definida.`, 'k'); guardarZonas(); }
+  drawing = null; dragStart = dragNow = null; ov.style.cursor = 'default';
+  renderZonas(); pintar();
+});
+function pintar() {
+  octx.clearRect(0, 0, ov.width, ov.height);
+  const draw = (r, color, label, activo) => {
+    if (!r) return;
+    const x = r.x * ov.width, y = r.y * ov.height, w = r.w * ov.width, h = r.h * ov.height;
+    octx.lineWidth = activo ? 4 : 2; octx.strokeStyle = color; octx.fillStyle = color + '22';
+    octx.fillRect(x, y, w, h); octx.strokeRect(x, y, w, h);
+    octx.fillStyle = color; octx.font = 'bold 12px system-ui'; octx.fillText(label, x + 4, y + 14);
+  };
+  zonas.forEach(z => { const T = TIPOS[z.tipo] || TIPOS.OTRA; const r = rt[z.nombre]; draw(z.rect, T.color, `${z.nombre} · ${z.tipo}`, !!(r && r.evento)); });
+  if (drawing && dragStart && dragNow) { const z = zonas[drawing.idx]; const T = TIPOS[z && z.tipo] || TIPOS.OTRA; draw(rectFrom(dragStart, dragNow), T.color, '…'); }
+}
+
+// ───────────────────────────────────────────── captura ──
+function capturar(rect, maxW) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  let sx = 0, sy = 0, sw = vw, sh = vh;
+  if (rect) { sx = Math.round(rect.x * vw); sy = Math.round(rect.y * vh); sw = Math.max(8, Math.round(rect.w * vw)); sh = Math.max(8, Math.round(rect.h * vh)); }
+  const scale = Math.min(1, (maxW || 1280) / sw);
+  work.width = Math.round(sw * scale); work.height = Math.round(sh * scale);
+  wctx.drawImage(video, sx, sy, sw, sh, 0, 0, work.width, work.height);
+  return work.toDataURL('image/jpeg', 0.75);
+}
+function subir(z, modo, motivo, evento, recorte) {
+  const T = TIPOS[z.tipo] || TIPOS.OTRA;
+  const d = capturar(recorte ? z.rect : null, recorte ? 1024 : 1280);
+  if (!d) return;
+  stats.fotos++; $('sFotos').textContent = stats.fotos;
+  const p = { tienda: tienda(), zona: z.nombre, modo, motivo, evento, b64: d, mime: 'image/jpeg', ts: Date.now() };
+  cola = cola.then(() => srv('guardarFoto', p))
+    .then(r => { if (r && r.url) log(`${z.nombre}: <a href="${r.url}" target="_blank">foto</a> fila ${r.fila} · ${motivo}`); else log(`${z.nombre}: enviada · ${motivo}`); })
+    .catch(e => log('Error al guardar: ' + e.message, 'e'));
+}
+
+// ───────────────────────────────────────────── disparos ──
+function fotosTiempo(motivo) {
+  zonas.filter(z => z.rect && (TIPOS[z.tipo] || TIPOS.OTRA).disparo === 'tiempo')
+       .forEach(z => subir(z, z.tipo, motivo, 'P_' + z.nombre + '_' + Date.now(), true));
+}
+
+function iniciarRafaga(z, pct) {
+  const r = rt[z.nombre];
+  const n = Math.round(num('rafN', 4)), seg = num('rafSeg', 20), evento = 'M_' + z.nombre + '_' + Date.now();
+  r.evento = { id: evento, i: 0 };
+  stats.ev++; $('sEv').textContent = stats.ev;
+  log(`${z.nombre}: movimiento ${pct.toFixed(1)}% → ráfaga ${n}×${seg}s`, 'k'); pintar();
+  const tomar = () => {
+    if (!running || !r.evento || r.evento.id !== evento) return;
+    r.evento.i++;
+    subir(z, z.tipo, `movimiento ${pct.toFixed(1)}% · foto ${r.evento.i}/${n} · cada ${seg}s`, evento, false);
+    if (r.evento.i < n) setTimeout(tomar, seg * 1000);
+    else { r.evento = null; r.cool = Date.now() + num('coolP', 90) * 1000; r.prev = null; pintar(); }
+  };
+  tomar();
+}
+
+function iniciarActividad(z, pct) {
+  const r = rt[z.nombre];
+  const seg = num('frSeg', 10), quieto = num('frQuieto', 30), max = num('frMax', 300), evento = 'A_' + z.nombre + '_' + Date.now();
+  const t0 = Date.now();
+  r.evento = { id: evento, i: 0, t0, ultimoMov: t0 };
+  stats.ev++; $('sEv').textContent = stats.ev;
+  log(`${z.nombre}: actividad ${pct.toFixed(1)}% → seguimiento (foto cada ${seg}s, cierra tras ${quieto}s quieto)`, 'k'); pintar();
+  const paso = () => {
+    if (!running || !r.evento || r.evento.id !== evento) return;
+    const now = Date.now();
+    const quietoDesde = (now - r.evento.ultimoMov) / 1000, transcurrido = (now - t0) / 1000;
+    const cerrar = quietoDesde >= quieto || transcurrido >= max;
+    r.evento.i++;
+    if (cerrar) {
+      const dur = Math.round((r.evento.ultimoMov - t0) / 1000);
+      subir(z, z.tipo, `cierre · duración ${dur} s · ${transcurrido >= max ? 'tope' : 'quieto ' + Math.round(quietoDesde) + 's'} · foto ${r.evento.i}`, evento, false);
+      log(`${z.nombre}: actividad terminó, duración ${dur} s, ${r.evento.i} fotos.`);
+      r.evento = null; r.cool = now + num('coolF', 20) * 1000; r.prev = null; pintar();
+      return;
+    }
+    subir(z, z.tipo, `actividad · foto ${r.evento.i} · t+${Math.round(transcurrido)}s`, evento, false);
+    setTimeout(paso, seg * 1000);
+  };
+  paso();
+}
+
+function medir() {
+  if (!running || !video.videoWidth) return;
+  const vw = video.videoWidth, vh = video.videoHeight, now = Date.now(), umbral = num('umbral', 3);
+  zonas.forEach((z, idx) => {
+    const T = TIPOS[z.tipo] || TIPOS.OTRA;
+    if (!z.rect || T.disparo === 'tiempo') return;
+    const r = rt[z.nombre] || (rt[z.nombre] = { prev: null, evento: null, cool: 0 });
+    sctx.drawImage(video, z.rect.x * vw, z.rect.y * vh, Math.max(1, z.rect.w * vw), Math.max(1, z.rect.h * vh), 0, 0, small.width, small.height);
+    const px = sctx.getImageData(0, 0, small.width, small.height).data;
+    const g = new Uint8ClampedArray(small.width * small.height);
+    for (let i = 0, j = 0; i < px.length; i += 4, j++) g[j] = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+    let pct = 0;
+    if (r.prev) { let ch = 0; for (let j = 0; j < g.length; j++) if (Math.abs(g[j] - r.prev[j]) > 25) ch++; pct = ch * 100 / g.length; }
+    r.prev = g; r.pct = pct;
+    const m = $('zm' + idx); if (m) m.style.width = Math.min(100, pct * 4) + '%';
+    const st = $('zst' + idx); if (st && !r.evento) st.textContent = `${T.label} · mov ${pct.toFixed(1)}%${now < r.cool ? ' · pausa' : ''}`;
+    if (r.evento && T.disparo === 'actividad' && pct >= umbral) r.evento.ultimoMov = now;
+    if (!r.evento && pct >= umbral && now > r.cool && now > warmupUntil) {
+      if (T.disparo === 'actividad') iniciarActividad(z, pct); else iniciarRafaga(z, pct);
+    }
+  });
+}
+let warmupUntil = 0;
+
+function iniciar() {
+  if (!stream) { setErr('Primero elige pantalla o pestaña.'); return; }
+  const listas = zonas.filter(z => z.rect);
+  if (!listas.length) { setErr('Dibuja al menos una zona.'); return; }
+  setErr('');
+  running = true; rt = {}; warmupUntil = Date.now() + 3000;
+  $('pillRun').textContent = 'corriendo'; $('pillRun').classList.add('on');
+  $('btnStart').disabled = true; $('btnStop').disabled = false;
+  ls('vigia_tienda', tienda());
+  if (listas.some(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo === 'tiempo')) {
+    fotosTiempo('inicio');
+    presTimer = setInterval(() => fotosTiempo('programada'), num('presMin', 10) * 60 * 1000);
+    log(`HOST: foto cada ${num('presMin', 10)} min.`);
+  }
+  if (listas.some(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo !== 'tiempo')) {
+    motionTimer = setInterval(medir, 400);
+    log(`Movimiento: umbral ${num('umbral', 3)}%, muestreo 400 ms, ${listas.filter(z => (TIPOS[z.tipo] || TIPOS.OTRA).disparo !== 'tiempo').length} zona(s).`);
+  }
+}
+function detener() {
+  running = false;
+  Object.values(rt).forEach(r => r.evento = null);
+  clearInterval(presTimer); clearInterval(motionTimer); presTimer = motionTimer = null;
+  $('pillRun').textContent = 'detenido'; $('pillRun').classList.remove('on');
+  $('btnStart').disabled = !stream; $('btnStop').disabled = true;
+  pintar(); log('Detenido.');
+}
+
+async function analizar() {
+  $('btnAnalizar').disabled = true; $('btnAnalizar').textContent = 'Analizando…';
+  try {
+    const r = await srv('analizarPendientes');
+    if (r && r.opaco) log('Análisis solicitado (sin confirmación fuera del iframe).');
+    else if (r && r.ok) { log(`Análisis: ${r.eventos} eventos / ${r.fotos} fotos, ${r.errores || 0} errores, quedan ${r.pendientes}.`, 'k'); $('sPend').textContent = r.pendientes; }
+    else log('Análisis: ' + (r && (r.error || r.msg) || 'sin respuesta'), 'e');
+  } catch (e) { log('Análisis falló: ' + e.message, 'e'); }
+  $('btnAnalizar').disabled = false; $('btnAnalizar').textContent = 'Analizar pendientes ahora';
+}
+
+// ───────────────────────────────────────────── wiring ──
+Object.keys(TIPOS).forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = TIPOS[k].label; $('zTipo').appendChild(o); });
+$('btnCam').onclick = elegirPantalla;
+$('btnStart').onclick = iniciar;
+$('btnStop').onclick = detener;
+$('btnAnalizar').onclick = analizar;
+$('tienda').addEventListener('change', () => { ls('vigia_tienda', tienda()); cargarConfig(); });
+$('execUrl').addEventListener('change', () => ls('vigia_exec', $('execUrl').value.trim()));
+$('token').addEventListener('change', () => ls('vigia_token', $('token').value.trim()));
+$('tienda').value = ls('vigia_tienda') || '';
+if (!EN_GAS && location.protocol === 'file:') {
+  // config local con URL + token (archivo hermano vigia_config.local.js)
+  const s = document.createElement('script');
+  s.src = 'vigia_config.local.js';
+  s.onload = s.onerror = () => cargarConfig();
+  document.head.appendChild(s);
+} else {
+  cargarConfig();
+}
+</script>
+</body>
+</html>
