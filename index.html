@@ -179,13 +179,12 @@ function limpiarNombre(s) { return String(s || '').trim().replace(/[\\\/:*?"<>|]
 // ───────────────────────────────────────────── servidor ──
 function srv(fn, ...args) {
   if (EN_GAS) return new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args));
-  const url = ($('execUrl').value || '').trim(), token = ($('token').value || '').trim();
-  if (!url || !token) return Promise.reject(new Error('fuera del iframe: falta URL /exec o token'));
+  const url = ($('execUrl').value || '').trim() || EXEC_DEFAULT, token = ($('token').value || '').trim();
   let body;
   if (fn === 'guardarFoto') body = Object.assign({}, args[0], { token });
   else if (fn === 'guardarAreas') body = { accion: 'areas', tienda: args[0], areas: args[1], token };
   else if (fn === 'analizarPendientes') body = { accion: 'analizar', token };
-  else if (fn === 'estado') body = { accion: 'estado', token };
+  else if (fn === 'ping') body = { accion: 'ping', token };
   else return Promise.resolve(null);
   // Apps Script responde JSON legible por CORS con text/plain (petición simple): así vemos errores reales
   return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
@@ -199,22 +198,16 @@ function srv(fn, ...args) {
 }
 
 async function validarToken() {
-  for (let intento = 0; intento < 3; intento++) {
-    try {
-      const d = await srv('estado');
-      $('sPend').textContent = '?';
-      log(`Conectado ✓ (token correcto) · ${d.filas} fotos en bitácora${d.tieneGemini ? '' : ' · falta GEMINI_API_KEY: no se analizan'}`, d.tieneGemini ? 'k' : 'e');
-      return true;
-    } catch (e) {
-      if (!/token/i.test(e.message)) { log('No pude validar conexión: ' + e.message, 'e'); return false; }
-      ls('vigia_token', '');
-      const t = (prompt('Token INCORRECTO. Pega el VIGIA_TOKEN real\n(Apps Script → proyecto Vigia → Configuración → VIGIA_TOKEN):') || '').trim();
-      if (!t) break;
-      $('token').value = t; ls('vigia_token', t);
-    }
+  // ya no se necesita token para guardar fotos; solo confirmamos que el servidor responde
+  try {
+    const d = await srv('ping');
+    log(`Conectado ✓ · ${d.filas} fotos en bitácora${d.tieneGemini ? ' · análisis Gemini activo' : ' · falta GEMINI_API_KEY: se guardan pero no se analizan'}`, d.tieneGemini ? 'k' : 'e');
+    return true;
+  } catch (e) {
+    setErr('No hay conexión con el servidor: ' + e.message);
+    log('Sin conexión: ' + e.message, 'e');
+    return false;
   }
-  setErr('Sin token válido: las fotos NO se van a guardar. Pon el VIGIA_TOKEN correcto en "Conexión" (abajo a la derecha).');
-  return false;
 }
 
 async function cargarConfig() {
@@ -237,10 +230,6 @@ async function cargarConfig() {
     const L = window.VIGIA_LOCAL || {};
     $('execUrl').value = ls('vigia_exec') || L.exec || EXEC_SRV;
     $('token').value = ls('vigia_token') || L.token || '';
-    if (!$('token').value) {
-      const t = (prompt('Vigia: pega el VIGIA_TOKEN.\n(Apps Script → proyecto Vigia → Configuración → VIGIA_TOKEN)\nSolo se pide una vez; queda guardado en este navegador.') || '').trim();
-      if (t) { $('token').value = t; ls('vigia_token', t); }
-    }
     await validarToken();
   }
   renderZonas(); pintar();
