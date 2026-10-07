@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigia · Recepción</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+    --series: #2a78d6; --series-soft: #cde2fb;
+    --good: #0ca30c; --bad: #d03b3b; --warn: #fab219; --good-ink: #006300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+      --series: #3987e5; --series-soft: #184f95; --good-ink: #0ca30c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --series: #3987e5; --series-soft: #184f95; --good-ink: #0ca30c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--ink2); font-size: 12px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; }
+  select, .seg button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; padding: 6px 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--ring); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--ring); }
+  .seg button.on { background: var(--series); color: #fff; font-weight: 600; }
+  .grid { display: grid; gap: 12px; }
+  .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 860px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 14px; min-width: 0; }
+  .tile .lbl { color: var(--ink2); font-size: 12px; }
+  .tile .val { font-size: 28px; font-weight: 650; margin-top: 2px; }
+  .tile .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .hero { grid-column: span 2; display: flex; gap: 16px; align-items: center; }
+  .hero .val { font-size: 52px; line-height: 1; }
+  .meter { flex: 1; min-width: 120px; }
+  .meter .bar { height: 12px; border-radius: 6px; background: var(--grid); overflow: hidden; display: flex; gap: 2px; }
+  .meter .bar i { display: block; height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--ink2); margin-top: 6px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+  .live { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 20px; margin-top: 4px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent); }
+  h2 { font-size: 14px; margin: 0 0 2px; }
+  .cap { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+  .two { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .strip { position: relative; height: 34px; border-radius: 6px; background: var(--grid); overflow: hidden; }
+  .strip i { position: absolute; top: 0; bottom: 0; }
+  .ticks { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { color: var(--ink2); font-weight: 600; font-size: 12px; }
+  .scroll { overflow-x: auto; }
+  .ev { display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--grid); align-items: start; }
+  .ev .t { color: var(--ink2); font-variant-numeric: tabular-nums; }
+  .ev .r { font-size: 12px; font-weight: 650; }
+  .ev .r.pass { color: var(--good-ink); }
+  .ev .r.fail { color: var(--bad); }
+  .msg { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--ring); background: var(--surface); margin-bottom: 12px; }
+  .msg.warn { border-color: var(--warn); }
+  a { color: var(--series); }
+  #tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--surface); padding: 6px 9px; border-radius: 6px; font-size: 12px; line-height: 1.35; opacity: 0; transition: opacity .1s; z-index: 10; max-width: 260px; }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>👁 Vigia · Recepción</h1>
+      <div class="sub" id="sub">cargando…</div>
+    </div>
+    <div class="filters">
+      <select id="tienda" aria-label="Tienda"></select>
+      <div class="seg" role="group" aria-label="Periodo">
+        <button data-p="hoy" class="on">Hoy</button>
+        <button data-p="semana">Esta semana</button>
+        <button data-p="mes">Este mes</button>
+      </div>
+      <a href="./" title="Página de captura">Captura</a>
+    </div>
+  </header>
+
+  <div id="avisos"></div>
+
+  <section class="grid tiles">
+    <div class="card tile hero">
+      <div>
+        <div class="lbl">Recepción cubierta</div>
+        <div class="val" id="kPct">–</div>
+        <div class="note">del tiempo monitoreado</div>
+      </div>
+      <div class="meter">
+        <div class="bar" id="kBar"></div>
+        <div class="legend">
+          <span style="--c:var(--good)">Con host <b id="kSi">–</b></span>
+          <span style="--c:var(--bad)">Vacía <b id="kNo">–</b></span>
+        </div>
+        <div class="note" id="kMon" style="margin-top:6px">–</div>
+      </div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">En vivo</div>
+      <div class="live" id="kLive"><span class="dot" style="--c:var(--muted)"></span>–</div>
+      <div class="note" id="kLiveNote">–</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Por analizar</div>
+      <div class="val" id="kPend">–</div>
+      <div class="note">fotos en cola (se analizan cada 5 min)</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Llegadas</div>
+      <div class="val" id="kLleg">–</div>
+      <div class="note" id="kLlegNote">–</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Tiempo para atender</div>
+      <div class="val" id="kAt">–</div>
+      <div class="note" id="kAtNote">–</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Llegadas sin atender a tiempo</div>
+      <div class="val" id="kFail">–</div>
+      <div class="note">evaluadas como FAIL</div>
+    </div>
+    <div class="card tile">
+      <div class="lbl">Salidas</div>
+      <div class="val" id="kSal">–</div>
+      <div class="note" id="kSalNote">–</div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:12px">
+    <h2>Hoy, minuto a minuto</h2>
+    <p class="cap" id="stripCap">Cada franja es una foto de la recepción. Gris = sin monitorear.</p>
+    <div class="strip" id="strip"></div>
+    <div class="ticks" id="stripTicks"></div>
+    <div class="legend"><span style="--c:var(--good)">Con host</span><span style="--c:var(--bad)">Vacía</span><span style="--c:var(--grid)">Sin monitorear</span></div>
+  </section>
+
+  <section class="grid two" style="margin-top:12px">
+    <div class="card">
+      <h2>% cubierta por hora</h2>
+      <p class="cap" id="horaCap">Periodo seleccionado, por hora del día.</p>
+      <div id="chHora"></div>
+    </div>
+    <div class="card">
+      <h2>Llegadas por hora</h2>
+      <p class="cap">Personas que entraron, periodo seleccionado.</p>
+      <div id="chLleg"></div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:12px">
+    <h2>% cubierta por día</h2>
+    <p class="cap">Últimos 30 días. Los días del periodo seleccionado van en color fuerte.</p>
+    <div id="chDia"></div>
+  </section>
+
+  <section class="grid two" style="margin-top:12px">
+    <div class="card">
+      <h2>Detalle por día</h2>
+      <div class="scroll"><table id="tabla"></table></div>
+    </div>
+    <div class="card">
+      <h2>Últimas llegadas</h2>
+      <div id="eventos"></div>
+    </div>
+  </section>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const EXEC = 'https://script.google.com/macros/s/AKfycbzPwqEs74peNw4GmutZFjVkgIskELiaQIZCrautUMPSE0cPl1-6FQs3BxJEjKTS_w8g/exec';
+const $ = id => document.getElementById(id);
+const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+let DATA = null, periodo = ls('dash_periodo') || 'hoy';
+
+// ───────── datos ─────────
+async function cargar() {
+  let token = ls('vigia_token') || '';
+  for (let i = 0; i < 2; i++) {
+    if (!token) {
+      token = (prompt('Dashboard Vigia: pega el VIGIA_TOKEN (solo una vez).') || '').trim();
+      if (!token) break;
+      ls('vigia_token', token);
+    }
+    try {
+      const r = await fetch(EXEC, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ accion: 'dash', dias: 62, token }) });
+      const d = await r.json();
+      if (d.ok) { DATA = d.dash; return true; }
+      if (/token/i.test(d.error || '')) { ls('vigia_token', ''); token = ''; continue; }
+      throw new Error(d.error);
+    } catch (e) { aviso('No pude leer datos: ' + e.message, true); return false; }
+  }
+  aviso('Sin token válido no se pueden mostrar datos.', true);
+  return false;
+}
+function aviso(t, warn) { $('avisos').innerHTML += `<div class="msg ${warn ? 'warn' : ''}">${t}</div>`; }
+
+// ───────── cálculo ─────────
+const segDe = h => { const p = String(h || '0:0:0').split(':').map(Number); return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0); };
+const iso = d => d.toISOString().slice(0, 10);
+function rango(hoy) {
+  const d = new Date(hoy + 'T12:00:00Z');
+  if (periodo === 'hoy') return [hoy, hoy];
+  if (periodo === 'semana') { const dow = d.getUTCDay() || 7; const ini = new Date(d); ini.setUTCDate(d.getUTCDate() - dow + 1); return [iso(ini), hoy]; }
+  return [hoy.slice(0, 8) + '01', hoy];
+}
+function muestrasHost(filas) {
+  // r = [fecha, hora, tienda, zona, modo, estado, tipo, resultado, seg, personas, evento, foto, resumen]
+  const grupos = {};
+  filas.forEach(r => {
+    if (r[4] !== 'HOST' || r[5] !== 'ANALIZADO') return;
+    const k = r[2] + '|' + r[0] + '|' + r[3];
+    (grupos[k] = grupos[k] || []).push({ fecha: r[0], hora: r[1], tienda: r[2], s: segDe(r[1]), presente: r[6] === 'STAFF' || (r[9] || 0) > 0, foto: r[11] });
+  });
+  const out = [];
+  Object.values(grupos).forEach(g => {
+    g.sort((a, b) => a.s - b.s);
+    const gaps = [];
+    for (let i = 0; i < g.length - 1; i++) gaps.push(Math.min((g[i + 1].s - g[i].s) / 60, DATA.hostGapMaxMin));
+    const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 2;
+    g.forEach((m, i) => { m.min = i < gaps.length ? gaps[i] : med; out.push(m); });
+  });
+  return out;
+}
+function eventosPuerta(filas) {
+  const ev = {};
+  filas.forEach(r => {
+    if (!['PUERTA', 'MOVIMIENTO', 'OTRA'].includes(r[4]) || r[5] !== 'ANALIZADO') return;
+    if (!ev[r[10]] || r[1] < ev[r[10]].hora) ev[r[10]] = { fecha: r[0], hora: r[1], tienda: r[2], tipo: r[6], res: r[7], seg: r[8], personas: r[9] || 0, foto: r[11], resumen: r[12] };
+  });
+  return Object.values(ev);
+}
+const fmtMin = m => { m = Math.round(m); const h = Math.floor(m / 60); return h ? `${h} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`; };
+const pct = x => (x == null || isNaN(x)) ? '–' : Math.round(x * 100) + '%';
+
+// ───────── render ─────────
+function render() {
+  if (!DATA) return;
+  const tSel = $('tienda').value;
+  const filas = DATA.filas.filter(r => !tSel || r[2] === tSel);
+  const hoy = DATA.ahora.slice(0, 10);
+  const [ini, fin] = rango(hoy);
+  const enP = f => f >= ini && f <= fin;
+  const M = muestrasHost(filas), E = eventosPuerta(filas);
+  const Mp = M.filter(m => enP(m.fecha)), Ep = E.filter(e => enP(e.fecha));
+
+  // KPIs host
+  const si = Mp.filter(m => m.presente).reduce((a, m) => a + m.min, 0);
+  const no = Mp.filter(m => !m.presente).reduce((a, m) => a + m.min, 0);
+  const tot = si + no;
+  $('kPct').textContent = tot ? pct(si / tot) : '–';
+  $('kSi').textContent = tot ? fmtMin(si) : '–';
+  $('kNo').textContent = tot ? fmtMin(no) : '–';
+  $('kMon').textContent = tot ? `Monitoreado: ${fmtMin(tot)} · ${Mp.length} fotos` : 'Sin fotos analizadas en este periodo';
+  $('kBar').innerHTML = tot ? `<i style="width:${si / tot * 100}%;background:var(--good)"></i><i style="width:${no / tot * 100}%;background:var(--bad)"></i>` : '';
+
+  // en vivo
+  const hoyM = M.filter(m => m.fecha === hoy).sort((a, b) => b.s - a.s);
+  if (hoyM.length) {
+    const u = hoyM[0], hace = Math.max(0, Math.round((segDe(DATA.ahora.slice(11)) - u.s) / 60));
+    $('kLive').innerHTML = `<span class="dot" style="--c:${u.presente ? 'var(--good)' : 'var(--bad)'}"></span>${u.presente ? 'Con host' : 'Vacía'}`;
+    $('kLiveNote').innerHTML = `última foto analizada hace ${hace} min · <a href="${u.foto}" target="_blank">ver</a>`;
+  } else { $('kLive').innerHTML = '<span class="dot" style="--c:var(--muted)"></span>Sin dato hoy'; $('kLiveNote').textContent = '¿está corriendo la página de captura?'; }
+  $('kPend').textContent = filas.filter(r => r[5] === 'PENDIENTE').length;
+
+  // KPIs puerta
+  const lleg = Ep.filter(e => e.tipo === 'LLEGADA'), sal = Ep.filter(e => e.tipo === 'SALIDA');
+  const pers = lleg.reduce((a, e) => a + e.personas, 0);
+  $('kLleg').textContent = pers;
+  $('kLlegNote').textContent = `personas en ${lleg.length} grupos`;
+  const at = lleg.filter(e => e.seg != null);
+  const prom = at.length ? Math.round(at.reduce((a, e) => a + e.seg, 0) / at.length) : null;
+  $('kAt').textContent = prom == null ? '–' : prom + ' s';
+  $('kAtNote').textContent = at.length ? `${pct(at.filter(e => e.seg <= 20).length / at.length)} atendidos en ≤20 s` : 'sin llegadas medidas';
+  $('kFail').textContent = lleg.filter(e => e.res === 'FAIL').length;
+  $('kSal').textContent = sal.reduce((a, e) => a + e.personas, 0);
+  $('kSalNote').textContent = `personas en ${sal.length} grupos`;
+
+  renderStrip(hoyM.slice().reverse());
+  renderHora(Mp, lleg);
+  renderDias(M, ini, fin, hoy);
+  renderTabla(M, E);
+  renderEventos(E.filter(e => e.tipo === 'LLEGADA').sort((a, b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora)).slice(0, 12));
+
+  const tiendas = [...new Set(DATA.filas.map(r => r[2]))].length;
+  $('sub').textContent = `Actualizado ${DATA.ahora.slice(11, 16)} · ${ini === fin ? ini : ini + ' → ' + fin} · se refresca cada minuto`;
+  if (!DATA.tieneGemini && !$('avisos').dataset.g) { $('avisos').dataset.g = 1; aviso('Falta la key de Gemini: las fotos se guardan pero no se analizan, por eso no hay porcentajes todavía.', true); }
+}
+
+function renderStrip(m) {
+  const el = $('strip'); el.innerHTML = '';
+  if (!m.length) { el.innerHTML = '<div class="empty" style="padding:8px">Sin fotos analizadas hoy</div>'; $('stripTicks').innerHTML = ''; return; }
+  const s0 = Math.floor(m[0].s / 3600) * 3600, s1 = Math.ceil((m[m.length - 1].s + m[m.length - 1].min * 60) / 3600) * 3600 || s0 + 3600;
+  const span = s1 - s0;
+  m.forEach(x => {
+    const i = document.createElement('i');
+    i.style.left = ((x.s - s0) / span * 100) + '%';
+    i.style.width = Math.max(0.15, x.min * 60 / span * 100) + '%';
+    i.style.background = x.presente ? 'var(--good)' : 'var(--bad)';
+    i.dataset.tip = `${x.hora.slice(0, 5)} · ${x.presente ? 'Con host' : 'Vacía'} · cubre ${Math.round(x.min)} min`;
+    el.appendChild(i);
+  });
+  const hs = []; for (let s = s0; s <= s1; s += 3600) hs.push(`<span>${String(s / 3600).padStart(2, '0')}:00</span>`);
+  $('stripTicks').innerHTML = hs.length > 14 ? hs.filter((_, i) => i % 2 === 0).join('') : hs.join('');
+}
+
+function barras(el, items, opts) {
+  // items: [{label, v, tip, strong}] — una sola serie, barras con punta redondeada anclada a la base
+  if (!items.length || items.every(x => !x.v)) { el.innerHTML = `<div class="empty">${opts.vacio || 'Sin datos'}</div>`; return; }
+  const W = 560, H = 190, pl = 34, pb = 22, pt = 8, w = W - pl - 4, h = H - pb - pt;
+  const max = opts.max || Math.max(1, ...items.map(x => x.v));
+  const bw = w / items.length, gap = Math.min(6, bw * 0.25), r = Math.min(4, (bw - gap) / 2);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opts.aria}">`;
+  [0, 0.5, 1].forEach(f => { const y = pt + h - f * h; s += `<line x1="${pl}" x2="${W - 4}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/><text x="${pl - 6}" y="${y + 4}" text-anchor="end">${opts.fmt(max * f)}</text>`; });
+  const paso = Math.ceil(items.length / 12);
+  items.forEach((x, i) => {
+    const bh = x.v / max * h, xx = pl + i * bw + gap / 2, ww = bw - gap, y = pt + h - bh;
+    if (bh > 0.5) {
+      const rr = Math.min(r, bh);
+      s += `<path d="M${xx},${pt + h} V${y + rr} Q${xx},${y} ${xx + rr},${y} H${xx + ww - rr} Q${xx + ww},${y} ${xx + ww},${y + rr} V${pt + h} Z" fill="${x.strong === false ? 'var(--series-soft)' : 'var(--series)'}"/>`;
+    }
+    s += `<rect x="${pl + i * bw}" y="${pt}" width="${bw}" height="${h}" fill="transparent" data-tip="${x.tip}"/>`;
+    if (i % paso === 0) s += `<text x="${xx + ww / 2}" y="${H - 6}" text-anchor="middle">${x.label}</text>`;
+  });
+  s += `<line x1="${pl}" x2="${W - 4}" y1="${pt + h}" y2="${pt + h}" stroke="var(--axis)" stroke-width="1"/></svg>`;
+  el.innerHTML = s;
+}
+
+function renderHora(Mp, lleg) {
+  const hs = {}, ls_ = {};
+  Mp.forEach(m => { const h = Math.floor(m.s / 3600); hs[h] = hs[h] || { si: 0, t: 0 }; hs[h].t += m.min; if (m.presente) hs[h].si += m.min; });
+  lleg.forEach(e => { const h = Math.floor(segDe(e.hora) / 3600); ls_[h] = (ls_[h] || 0) + e.personas; });
+  const horas = [...new Set([...Object.keys(hs), ...Object.keys(ls_)].map(Number))].sort((a, b) => a - b);
+  const lo = horas.length ? horas[0] : 11, hi = horas.length ? horas[horas.length - 1] : 22;
+  const rango_ = []; for (let h = lo; h <= hi; h++) rango_.push(h);
+  barras($('chHora'), rango_.map(h => ({ label: h + 'h', v: hs[h] && hs[h].t ? hs[h].si / hs[h].t : 0, tip: `${h}:00–${h}:59 · ${hs[h] && hs[h].t ? pct(hs[h].si / hs[h].t) + ' cubierta · ' + fmtMin(hs[h].t) + ' monitoreado' : 'sin monitorear'}` })), { max: 1, fmt: v => Math.round(v * 100) + '%', aria: '% cubierta por hora', vacio: 'Sin fotos analizadas en el periodo' });
+  barras($('chLleg'), rango_.map(h => ({ label: h + 'h', v: ls_[h] || 0, tip: `${h}:00–${h}:59 · ${ls_[h] || 0} personas` })), { fmt: v => Math.round(v), aria: 'Llegadas por hora', vacio: 'Sin llegadas en el periodo' });
+}
+
+function renderDias(M, ini, fin, hoy) {
+  const ds = {};
+  M.forEach(m => { ds[m.fecha] = ds[m.fecha] || { si: 0, t: 0 }; ds[m.fecha].t += m.min; if (m.presente) ds[m.fecha].si += m.min; });
+  const items = [];
+  for (let i = 29; i >= 0; i--) {
+    const f = iso(new Date(new Date(hoy + 'T12:00:00Z').getTime() - i * 86400000)), d = ds[f];
+    items.push({ label: f.slice(8) + '/' + f.slice(5, 7), v: d && d.t ? d.si / d.t : 0, strong: f >= ini && f <= fin, tip: `${f} · ${d && d.t ? pct(d.si / d.t) + ' cubierta · ' + fmtMin(d.t) + ' monitoreado' : 'sin monitorear'}` });
+  }
+  barras($('chDia'), items, { max: 1, fmt: v => Math.round(v * 100) + '%', aria: '% cubierta por día', vacio: 'Sin días con fotos analizadas' });
+}
+
+function renderTabla(M, E) {
+  const ds = {};
+  const k = (f, t) => (ds[f + '|' + t] = ds[f + '|' + t] || { f, t, si: 0, tot: 0, lleg: 0, pers: 0, atS: 0, atN: 0, fail: 0 });
+  M.forEach(m => { const a = k(m.fecha, m.tienda); a.tot += m.min; if (m.presente) a.si += m.min; });
+  E.filter(e => e.tipo === 'LLEGADA').forEach(e => { const a = k(e.fecha, e.tienda); a.lleg++; a.pers += e.personas; if (e.seg != null) { a.atS += e.seg; a.atN++; } if (e.res === 'FAIL') a.fail++; });
+  const rows = Object.values(ds).sort((a, b) => b.f.localeCompare(a.f) || a.t.localeCompare(b.t)).slice(0, 31);
+  $('tabla').innerHTML = rows.length ? `<thead><tr><th>Día</th><th>Tienda</th><th>Cubierta</th><th>Monitoreado</th><th>Personas</th><th>Atención</th><th>FAIL</th></tr></thead><tbody>` +
+    rows.map(a => `<tr><td>${a.f}</td><td>${a.t}</td><td>${a.tot ? pct(a.si / a.tot) : '–'}</td><td>${a.tot ? fmtMin(a.tot) : '–'}</td><td>${a.pers}</td><td>${a.atN ? Math.round(a.atS / a.atN) + ' s' : '–'}</td><td>${a.fail}</td></tr>`).join('') + '</tbody>'
+    : '<tbody><tr><td class="empty" colspan="7">Sin datos todavía</td></tr></tbody>';
+}
+
+function renderEventos(L) {
+  $('eventos').innerHTML = L.length ? L.map(e => `<div class="ev"><div class="t">${e.hora.slice(0, 5)}<br><span style="font-size:11px">${e.fecha.slice(5)}</span></div><div>${e.personas} persona${e.personas === 1 ? '' : 's'}${e.seg != null ? ' · atendidos en ' + e.seg + ' s' : ''}<br><span style="color:var(--ink2);font-size:12px">${e.resumen || ''}</span></div><div style="text-align:right"><div class="r ${e.res === 'FAIL' ? 'fail' : 'pass'}">${e.res === 'FAIL' ? '✕ FAIL' : '✓ OK'}</div><a href="${e.foto}" target="_blank" style="font-size:12px">foto</a></div></div>`).join('')
+    : '<div class="empty">Sin llegadas analizadas todavía</div>';
+}
+
+// ───────── tooltip ─────────
+document.addEventListener('mousemove', e => {
+  const t = e.target.closest('[data-tip]'), tip = $('tip');
+  if (!t) { tip.style.opacity = 0; return; }
+  tip.textContent = t.dataset.tip; tip.style.opacity = 1;
+  const x = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8);
+  tip.style.left = x + 'px'; tip.style.top = (e.clientY + 14) + 'px';
+});
+
+// ───────── wiring ─────────
+document.querySelectorAll('.seg button').forEach(b => {
+  b.classList.toggle('on', b.dataset.p === periodo);
+  b.onclick = () => { periodo = b.dataset.p; ls('dash_periodo', periodo); document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b)); render(); };
+});
+$('tienda').onchange = () => { ls('dash_tienda', $('tienda').value); render(); };
+async function ciclo() {
+  $('avisos').innerHTML = ''; delete $('avisos').dataset.g;
+  if (await cargar()) {
+    const sel = ls('dash_tienda') || '';
+    const ts = [...new Set(DATA.filas.map(r => r[2]))].sort();
+    $('tienda').innerHTML = '<option value="">Todas las tiendas</option>' + ts.map(t => `<option ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
+    render();
+  }
+}
+ciclo();
+setInterval(ciclo, 60000);
+</script>
+</body>
+</html>

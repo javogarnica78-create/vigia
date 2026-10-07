@@ -61,6 +61,7 @@
   <span class="pill" id="pillCam">sin cámara</span>
   <span class="pill" id="pillRun">detenido</span>
   <span class="mini" id="links"></span>
+  <a href="dash.html" target="_blank" style="margin-left:auto;font-weight:600">📊 Dashboard</a>
 </header>
 
 <main>
@@ -79,7 +80,7 @@
 
     <h2>2 · Dibujar áreas</h2>
     <button id="btnQHost" class="big" style="border-left:6px solid #3b82f6">① Área HOSTESS<br><span class="mini">dónde debe estar la host · foto cada X min</span></button>
-    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">al cruzar alguien toma ráfaga de fotos</span></button>
+    <button id="btnQPuerta" class="big" style="border-left:6px solid #f59e0b">② Área UMBRAL / PUERTA<br><span class="mini">al cruzar alguien: 6 fotos, una cada 5 s</span></button>
     <div class="mini" id="zonaHint" style="color:#ffb020;font-size:13px"></div>
     <div id="zonas" style="display:flex;flex-direction:column;gap:6px"></div>
     <details><summary>+ Más zonas (cuarto frío, otras)</summary>
@@ -96,9 +97,9 @@
     </details>
     <details><summary>PUERTA / OTRA · ráfaga fija</summary>
       <div class="grid2">
-        <label>Fotos <input type="number" id="rafN" value="4" min="1" max="8"></label>
-        <label>Cada <input type="number" id="rafSeg" value="20" min="3" max="120"> s</label>
-        <label>Pausa después <input type="number" id="coolP" value="90" min="0" max="900"> s</label>
+        <label>Fotos <input type="number" id="rafN" value="6" min="1" max="12"></label>
+        <label>Cada <input type="number" id="rafSeg" value="5" min="2" max="120"> s</label>
+        <label>Pausa después <input type="number" id="coolP" value="20" min="0" max="900"> s</label>
       </div>
     </details>
     <details><summary>FRIO · seguimiento hasta quietud</summary>
