@@ -146,6 +146,11 @@
       <div class="val" id="kSal">–</div>
       <div class="note" id="kSalNote">–</div>
     </div>
+    <div class="card tile">
+      <div class="lbl">Empleados entrando / saliendo</div>
+      <div class="val" id="kEmp">–</div>
+      <div class="note">descontados de las llegadas</div>
+    </div>
   </section>
 
   <section class="card" style="margin-top:12px">
@@ -296,6 +301,7 @@ function render() {
   $('kFail').textContent = lleg.filter(e => e.res === 'FAIL').length;
   $('kSal').textContent = sal.reduce((a, e) => a + e.personas, 0);
   $('kSalNote').textContent = `personas en ${sal.length} grupos`;
+  $('kEmp').textContent = Ep.filter(e => e.tipo === 'EMPLEADO').reduce((a, e) => a + (e.personas || 1), 0);
 
   renderStrip(hoyM.slice().reverse());
   renderHora(Mp, lleg);
